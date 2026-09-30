@@ -4,13 +4,15 @@
  * the license and the contributors participating to this project.
  */
 
+using System.ComponentModel;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace OpenIddict.MongoDb;
 
 /// <inheritdoc/>
-public class OpenIddictMongoDbContext : IOpenIddictMongoDbContext
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictMongoDbContext : IOpenIddictMongoDbContext
 {
     private readonly IOptionsMonitor<OpenIddictMongoDbOptions> _options;
     private readonly IServiceProvider _provider;
@@ -19,8 +21,8 @@ public class OpenIddictMongoDbContext : IOpenIddictMongoDbContext
         IOptionsMonitor<OpenIddictMongoDbOptions> options,
         IServiceProvider provider)
     {
-        _options = options;
-        _provider = provider;
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _provider = provider ?? throw new ArgumentNullException(nameof(provider));
     }
 
     /// <inheritdoc/>
@@ -28,21 +30,16 @@ public class OpenIddictMongoDbContext : IOpenIddictMongoDbContext
     {
         if (cancellationToken.IsCancellationRequested)
         {
-            return new ValueTask<IMongoDatabase>(Task.FromCanceled<IMongoDatabase>(cancellationToken));
+            return new(Task.FromCanceled<IMongoDatabase>(cancellationToken));
         }
 
-        var database = _options.CurrentValue.Database;
+        var database = _options.CurrentValue.Database ?? _provider.GetService<IMongoDatabase>();
         if (database is null)
         {
-            database = _provider.GetService<IMongoDatabase>();
-        }
-
-        if (database is null)
-        {
-            return new ValueTask<IMongoDatabase>(Task.FromException<IMongoDatabase>(
+            return new(Task.FromException<IMongoDatabase>(
                 new InvalidOperationException(SR.GetResourceString(SR.ID0262))));
         }
 
-        return new ValueTask<IMongoDatabase>(database);
+        return new(database);
     }
 }

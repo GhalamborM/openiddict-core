@@ -4,8 +4,11 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Collections.Immutable;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Primitives;
 
@@ -15,7 +18,7 @@ namespace OpenIddict.Abstractions;
 /// Represents a generic OpenIddict response.
 /// </summary>
 /// <remarks>
-/// Security notice: developers instantiating this type are responsible of ensuring that the
+/// Security notice: developers instantiating this type are responsible for ensuring that the
 /// imported parameters are safe and won't cause the resulting message to grow abnormally,
 /// which may result in an excessive memory consumption and a potential denial of service.
 /// </remarks>
@@ -46,6 +49,16 @@ public class OpenIddictResponse : OpenIddictMessage
     /// </summary>
     /// <param name="parameters">The response parameters.</param>
     /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+    public OpenIddictResponse(JsonObject parameters)
+        : base(parameters)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new OpenIddict response.
+    /// </summary>
+    /// <param name="parameters">The response parameters.</param>
+    /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
     public OpenIddictResponse(IEnumerable<KeyValuePair<string, OpenIddictParameter>> parameters)
         : base(parameters)
     {
@@ -66,7 +79,7 @@ public class OpenIddictResponse : OpenIddictMessage
     /// </summary>
     /// <param name="parameters">The response parameters.</param>
     /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
-    public OpenIddictResponse(IEnumerable<KeyValuePair<string, string?[]?>> parameters)
+    public OpenIddictResponse(IEnumerable<KeyValuePair<string, ImmutableArray<string?>>> parameters)
         : base(parameters)
     {
     }
@@ -77,6 +90,16 @@ public class OpenIddictResponse : OpenIddictMessage
     /// <param name="parameters">The response parameters.</param>
     /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
     public OpenIddictResponse(IEnumerable<KeyValuePair<string, StringValues>> parameters)
+        : base(parameters)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new OpenIddict response.
+    /// </summary>
+    /// <param name="parameters">The response parameters.</param>
+    /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+    public OpenIddictResponse(NameValueCollection parameters)
         : base(parameters)
     {
     }
@@ -154,12 +177,39 @@ public class OpenIddictResponse : OpenIddictMessage
     }
 
     /// <summary>
+    /// Gets or sets the "iss" parameter.
+    /// </summary>
+    public string? Iss
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.Iss);
+        set => SetParameter(OpenIddictConstants.Parameters.Iss, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the "issued_token_type" parameter.
+    /// </summary>
+    public string? IssuedTokenType
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.IssuedTokenType);
+        set => SetParameter(OpenIddictConstants.Parameters.IssuedTokenType, value);
+    }
+
+    /// <summary>
     /// Gets or sets the "refresh_token" parameter.
     /// </summary>
     public string? RefreshToken
     {
         get => (string?) GetParameter(OpenIddictConstants.Parameters.RefreshToken);
         set => SetParameter(OpenIddictConstants.Parameters.RefreshToken, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the "request_uri" parameter.
+    /// </summary>
+    public string? RequestUri
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.RequestUri);
+        set => SetParameter(OpenIddictConstants.Parameters.RequestUri, value);
     }
 
     /// <summary>
@@ -196,5 +246,23 @@ public class OpenIddictResponse : OpenIddictMessage
     {
         get => (string?) GetParameter(OpenIddictConstants.Parameters.UserCode);
         set => SetParameter(OpenIddictConstants.Parameters.UserCode, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the "verification_uri" parameter.
+    /// </summary>
+    public string? VerificationUri
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.VerificationUri);
+        set => SetParameter(OpenIddictConstants.Parameters.VerificationUri, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the "verification_uri_complete" parameter.
+    /// </summary>
+    public string? VerificationUriComplete
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.VerificationUriComplete);
+        set => SetParameter(OpenIddictConstants.Parameters.VerificationUriComplete, value);
     }
 }

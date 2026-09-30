@@ -14,7 +14,7 @@ public static partial class OpenIddictValidationEvents
     /// Represents an event called for each request to the introspection endpoint
     /// to give the user code a chance to add parameters to the introspection request.
     /// </summary>
-    public class PrepareIntrospectionRequestContext : BaseExternalContext
+    public sealed class PrepareIntrospectionRequestContext : BaseExternalContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="PrepareIntrospectionRequestContext"/> class.
@@ -36,19 +36,27 @@ public static partial class OpenIddictValidationEvents
         /// <summary>
         /// Gets or sets the token sent to the introspection endpoint.
         /// </summary>
-        public string? Token { get; set; }
+        public string? Token
+        {
+            get => Request.Token;
+            set => Request.Token = value;
+        }
 
         /// <summary>
         /// Gets or sets the token type sent to the introspection endpoint.
         /// </summary>
-        public string? TokenTypeHint { get; set; }
+        public string? TokenTypeHint
+        {
+            get => Request.TokenTypeHint;
+            set => Request.TokenTypeHint = value;
+        }
     }
 
     /// <summary>
     /// Represents an event called for each request to the introspection endpoint
     /// to send the introspection request to the remote authorization server.
     /// </summary>
-    public class ApplyIntrospectionRequestContext : BaseExternalContext
+    public sealed class ApplyIntrospectionRequestContext : BaseExternalContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ApplyIntrospectionRequestContext"/> class.
@@ -72,7 +80,7 @@ public static partial class OpenIddictValidationEvents
     /// Represents an event called for each introspection response
     /// to extract the response parameters from the server response.
     /// </summary>
-    public class ExtractIntrospectionResponseContext : BaseExternalContext
+    public sealed class ExtractIntrospectionResponseContext : BaseExternalContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ExtractIntrospectionResponseContext"/> class.
@@ -92,7 +100,7 @@ public static partial class OpenIddictValidationEvents
         }
 
         /// <summary>
-        /// Gets or sets the response, or <c>null</c> if it wasn't extracted yet.
+        /// Gets or sets the response, or <see langword="null"/> if it wasn't extracted yet.
         /// </summary>
         public OpenIddictResponse? Response
         {
@@ -104,7 +112,7 @@ public static partial class OpenIddictValidationEvents
     /// <summary>
     /// Represents an event called for each introspection response.
     /// </summary>
-    public class HandleIntrospectionResponseContext : BaseExternalContext
+    public sealed class HandleIntrospectionResponseContext : BaseExternalContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="HandleIntrospectionResponseContext"/> class.

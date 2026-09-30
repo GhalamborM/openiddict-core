@@ -5,25 +5,32 @@
  */
 
 using System.ComponentModel;
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Data.Entity.Infrastructure.Annotations;
 using System.Data.Entity.ModelConfiguration;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq.Expressions;
 using OpenIddict.EntityFramework.Models;
 
 namespace OpenIddict.EntityFramework;
 
 /// <summary>
-/// Defines a relational mapping for the Application entity.
+/// Defines a relational mapping for the application entity.
 /// </summary>
-/// <typeparam name="TApplication">The type of the Application entity.</typeparam>
-/// <typeparam name="TAuthorization">The type of the Authorization entity.</typeparam>
-/// <typeparam name="TToken">The type of the Token entity.</typeparam>
-/// <typeparam name="TKey">The type of the Key entity.</typeparam>
+/// <typeparam name="TApplication">The type of the application entity.</typeparam>
+/// <typeparam name="TAuthorization">The type of the authorization entity.</typeparam>
+/// <typeparam name="TSession">The type of the session entity.</typeparam>
+/// <typeparam name="TToken">The type of the token entity.</typeparam>
+/// <typeparam name="TKey">The type of the primary key.</typeparam>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public class OpenIddictEntityFrameworkApplicationConfiguration<TApplication, TAuthorization, TToken, TKey> : EntityTypeConfiguration<TApplication>
-    where TApplication : OpenIddictEntityFrameworkApplication<TKey, TAuthorization, TToken>
-    where TAuthorization : OpenIddictEntityFrameworkAuthorization<TKey, TApplication, TToken>
-    where TToken : OpenIddictEntityFrameworkToken<TKey, TApplication, TAuthorization>
+public sealed class OpenIddictEntityFrameworkApplicationConfiguration<
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TApplication,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TAuthorization,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSession,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TToken,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TKey> : EntityTypeConfiguration<TApplication>
+    where TApplication : OpenIddictEntityFrameworkApplication<TKey, TAuthorization, TSession, TToken>
+    where TAuthorization : OpenIddictEntityFrameworkAuthorization<TKey, TApplication, TSession, TToken>
+    where TSession : OpenIddictEntityFrameworkSession<TKey, TApplication, TAuthorization, TToken>
+    where TToken : OpenIddictEntityFrameworkToken<TKey, TApplication, TAuthorization, TSession>
     where TKey : notnull, IEquatable<TKey>
 {
     public OpenIddictEntityFrameworkApplicationConfiguration()
@@ -32,36 +39,56 @@ public class OpenIddictEntityFrameworkApplicationConfiguration<TApplication, TAu
         // Entity Framework would throw an exception due to the TKey generic parameter
         // being non-nullable when using value types like short, int, long or Guid.
 
-        HasKey(application => application.Id);
-
-        Property(application => application.ClientId)
-            .HasMaxLength(100)
-            .HasColumnAnnotation(IndexAnnotation.AnnotationName, new IndexAnnotation(new IndexAttribute
-            {
-                IsUnique = true
-            }));
-
-        Property(application => application.ConcurrencyToken)
-            .HasMaxLength(50)
-            .IsConcurrencyToken();
-
-        Property(application => application.ConsentType)
-            .HasMaxLength(50);
-
-        Property(application => application.Type)
-            .HasMaxLength(50);
-
-        HasMany(application => application.Authorizations)
-            .WithOptional(authorization => authorization.Application!)
-            .Map(association =>
+        HasMany(static application => application.Authorizations)
+            .WithOptional(static authorization => authorization.Application!)
+            .Map(static association =>
             {
                 association.MapKey(nameof(OpenIddictEntityFrameworkAuthorization.Application) +
                                    nameof(OpenIddictEntityFrameworkApplication.Id));
             });
 
-        HasMany(application => application.Tokens)
-            .WithOptional(token => token.Application!)
-            .Map(association =>
+        Property(static application => application.ApplicationType)
+            .HasMaxLength(50);
+
+        Property(static application => application.ClientId)
+            .HasMaxLength(100);
+
+        HasIndex(static application => application.ClientId)
+            .IsUnique();
+
+        Property(static application => application.ClientType)
+            .HasMaxLength(50);
+
+        Property(static application => application.ConcurrencyToken)
+            .HasMaxLength(50)
+            .IsConcurrencyToken();
+
+        Property(static application => application.ConsentType)
+            .HasMaxLength(50);
+
+        HasKey(static application => application.Id);
+
+        if (typeof(TKey) == typeof(string))
+        {
+            var parameter = Expression.Parameter(typeof(TApplication), "application");
+            var property = Expression.Property(parameter,
+                typeof(TApplication).GetProperty(nameof(OpenIddictEntityFrameworkApplication.Id))!);
+            var lambda = Expression.Lambda<Func<TApplication, string>>(property, parameter);
+
+            Property(lambda).HasMaxLength(100);
+        }
+
+        HasMany(static application => application.Sessions)
+            .WithOptional(static session => session.Application!)
+            .Map(static association =>
+            {
+                association.MapKey(nameof(OpenIddictEntityFrameworkSession.Application) +
+                                   nameof(OpenIddictEntityFrameworkApplication.Id));
+            });
+
+        HasMany(static application => application.Tokens)
+            .WithOptional(static token => token.Application!)
+            .Map(static association =>
             {
                 association.MapKey(nameof(OpenIddictEntityFrameworkToken.Application) +
                                    nameof(OpenIddictEntityFrameworkApplication.Id));

@@ -4,9 +4,10 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Collections.Immutable;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
-using System.Text.Encodings.Web;
 using AngleSharp.Html.Parser;
 using Microsoft.Extensions.Primitives;
 
@@ -42,18 +43,8 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
     /// <param name="parser">The HTML parser used to parse the responses returned by the OpenID Connect server.</param>
     public OpenIddictServerIntegrationTestClient(HttpClient client, HtmlParser parser)
     {
-        if (client is null)
-        {
-            throw new ArgumentNullException(nameof(client));
-        }
-
-        if (parser is null)
-        {
-            throw new ArgumentNullException(nameof(parser));
-        }
-
-        HttpClient = client;
-        HtmlParser = parser;
+        HttpClient = client ?? throw new ArgumentNullException(nameof(client));
+        HtmlParser = parser ?? throw new ArgumentNullException(nameof(parser));
     }
 
     /// <summary>
@@ -95,15 +86,8 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
     /// <returns>The OpenID Connect response returned by the server.</returns>
     public Task<OpenIddictResponse> GetAsync(string uri, OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (string.IsNullOrEmpty(uri))
-        {
-            throw new ArgumentException("The URL cannot be null or empty.", nameof(uri));
-        }
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(uri);
 
         return GetAsync(new Uri(uri, UriKind.RelativeOrAbsolute), request);
     }
@@ -127,15 +111,8 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
     /// <returns>The OpenID Connect response returned by the server.</returns>
     public Task<OpenIddictResponse> PostAsync(string uri, OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (string.IsNullOrEmpty(uri))
-        {
-            throw new ArgumentException("The URL cannot be null or empty.", nameof(uri));
-        }
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(uri);
 
         return PostAsync(new Uri(uri, UriKind.RelativeOrAbsolute), request);
     }
@@ -160,20 +137,9 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
     /// <returns>The OpenID Connect response returned by the server.</returns>
     public Task<OpenIddictResponse> SendAsync(string method, string uri, OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (string.IsNullOrEmpty(method))
-        {
-            throw new ArgumentException("The HTTP method cannot be null or empty.", nameof(method));
-        }
-
-        if (string.IsNullOrEmpty(uri))
-        {
-            throw new ArgumentException("The URL cannot be null or empty.", nameof(uri));
-        }
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(method);
+        ArgumentException.ThrowIfNullOrEmpty(uri);
 
         return SendAsync(new HttpMethod(method), uri, request);
     }
@@ -188,20 +154,9 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
     /// <returns>The OpenID Connect response returned by the server.</returns>
     public Task<OpenIddictResponse> SendAsync(HttpMethod method, string uri, OpenIddictRequest request)
     {
-        if (method is null)
-        {
-            throw new ArgumentNullException(nameof(method));
-        }
-
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (string.IsNullOrEmpty(uri))
-        {
-            throw new ArgumentException("The URL cannot be null or empty.", nameof(uri));
-        }
+        ArgumentNullException.ThrowIfNull(method);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(uri);
 
         return SendAsync(method, new Uri(uri, UriKind.RelativeOrAbsolute), request);
     }
@@ -216,26 +171,9 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
     /// <returns>The OpenID Connect response returned by the server.</returns>
     public virtual async Task<OpenIddictResponse> SendAsync(HttpMethod method, Uri uri, OpenIddictRequest request)
     {
-        if (method is null)
-        {
-            throw new ArgumentNullException(nameof(method));
-        }
-
-        if (uri is null)
-        {
-            throw new ArgumentNullException(nameof(uri));
-        }
-
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (HttpClient.BaseAddress is null && !uri.IsAbsoluteUri)
-        {
-            throw new ArgumentException("The address cannot be a relative URI when no base address " +
-                                        "is associated with the HTTP client.", nameof(uri));
-        }
+        ArgumentNullException.ThrowIfNull(method);
+        ArgumentNullException.ThrowIfNull(uri);
+        ArgumentNullException.ThrowIfNull(request);
 
         using var message = CreateRequestMessage(request, method, uri);
         using var response = await HttpClient.SendAsync(message);
@@ -245,71 +183,28 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
 
     private HttpRequestMessage CreateRequestMessage(OpenIddictRequest request, HttpMethod method, Uri uri)
     {
-        // Note: a dictionary is deliberately not used here to allow multiple parameters with the
-        // same name to be specified. While initially not allowed by the core OAuth2 specification,
-        // this is required for derived drafts like the OAuth2 token exchange specification.
-        var parameters = new List<KeyValuePair<string?, string?>>();
-
-        foreach (var parameter in request.GetParameters())
+        if (!uri.IsAbsoluteUri)
         {
-            // If the parameter is null or empty, send an empty value.
-            if (OpenIddictParameter.IsNullOrEmpty(parameter.Value))
-            {
-                parameters.Add(new KeyValuePair<string?, string?>(parameter.Key, string.Empty));
-
-                continue;
-            }
-
-            var values = (string?[]?) parameter.Value;
-            if (values is null || values.Length == 0)
-            {
-                continue;
-            }
-
-            foreach (var value in values)
-            {
-                parameters.Add(new KeyValuePair<string?, string?>(parameter.Key, value));
-            }
-        }
-
-        if (method == HttpMethod.Get && parameters.Count != 0)
-        {
-            var builder = new StringBuilder();
-
-            foreach (var parameter in parameters)
-            {
-                if (string.IsNullOrEmpty(parameter.Key))
-                {
-                    continue;
-                }
-
-                if (builder.Length != 0)
-                {
-                    builder.Append('&');
-                }
-
-                builder.Append(UrlEncoder.Default.Encode(parameter.Key));
-
-                if (!string.IsNullOrEmpty(parameter.Value))
-                {
-                    builder.Append('=');
-                    builder.Append(UrlEncoder.Default.Encode(parameter.Value));
-                }
-            }
-
-            if (!uri.IsAbsoluteUri)
-            {
-                uri = new Uri(HttpClient.BaseAddress!, uri);
-            }
-
-            uri = new UriBuilder(uri) { Query = builder.ToString() }.Uri;
+            uri = new Uri(HttpClient.BaseAddress!, uri);
         }
 
         var message = new HttpRequestMessage(method, uri);
-
-        if (method != HttpMethod.Get)
+        if (message.Method == HttpMethod.Get && request.Count is not 0)
         {
-            message.Content = new FormUrlEncodedContent(parameters);
+            message.RequestUri = OpenIddictHelpers.AddQueryStringParameters(message.RequestUri!,
+                request.GetParameters().ToDictionary(
+                    static parameter => parameter.Key,
+                    static parameter => (StringValues) parameter.Value, StringComparer.Ordinal));
+        }
+
+        if (message.Method != HttpMethod.Get)
+        {
+            message.Content = new FormUrlEncodedContent(
+                from parameter in request.GetParameters()
+                let values = (ImmutableArray<string?>?) parameter.Value
+                where values is not null
+                from value in values.GetValueOrDefault()
+                select KeyValuePair.Create(parameter.Key, value));
         }
 
         return message;
@@ -317,42 +212,92 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
 
     private async Task<OpenIddictResponse> GetResponseAsync(HttpResponseMessage message)
     {
-        if (message.Headers.WwwAuthenticate.Count != 0)
+        if (message.Headers.WwwAuthenticate.Count is not 0)
         {
-            var response = new OpenIddictResponse();
+            return new OpenIddictResponse(message.Headers.WwwAuthenticate
+                .Where(static header => !string.IsNullOrEmpty(header.Parameter))
+                .SelectMany(static header => ParseParameters(header.Parameter!)));
 
-            foreach (var header in message.Headers.WwwAuthenticate)
+            static IEnumerable<KeyValuePair<string, string?>> ParseParameters(string parameter)
             {
-                if (string.IsNullOrEmpty(header.Parameter))
+                var index = 0;
+
+                while (index < parameter.Length)
                 {
-                    continue;
-                }
-
-                foreach (var parameter in header.Parameter.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var values = parameter.Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (values.Length != 2)
+                    // Skip leading whitespaces and commas.
+                    while (index < parameter.Length && (char.IsWhiteSpace(parameter[index]) || parameter[index] is ','))
                     {
-                        continue;
+                        index++;
                     }
 
-                    var name = values[0]?.Trim(' ', '"');
-                    if (string.IsNullOrEmpty(name))
+                    // Parse the parameter key.
+                    var start = index;
+                    while (index < parameter.Length && parameter[index] is not ('=' or ','))
                     {
-                        continue;
+                        index++;
                     }
 
-                    var value = values[1]?.Trim(' ', '"');
-                    if (string.IsNullOrEmpty(name))
+                    if (index >= parameter.Length || parameter[index] is ',')
                     {
-                        continue;
+                        break;
                     }
 
-                    response.SetParameter(name, value);
+                    var key = parameter[start..index].Trim();
+
+                    // Skip the equals sign.
+                    index++;
+                    while (index < parameter.Length && char.IsWhiteSpace(parameter[index]))
+                    {
+                        index++;
+                    }
+
+                    // Parse the parameter value.
+                    string value;
+                    if (index < parameter.Length && parameter[index] is '"')
+                    {
+                        // Skip the opening quote.
+                        index++;
+
+                        var builder = new StringBuilder();
+
+                        while (index < parameter.Length)
+                        {
+                            if (parameter[index] is '\\' && index + 1 < parameter.Length)
+                            {
+                                builder.Append(parameter[index + 1]);
+                                index += 2;
+                            }
+
+                            else if (parameter[index] is '"')
+                            {
+                                // Skip the closing quote.
+                                index++;
+                                break;
+                            }
+
+                            else
+                            {
+                                builder.Append(parameter[index++]);
+                            }
+                        }
+
+                        value = builder.ToString();
+                    }
+
+                    else
+                    {
+                        start = index;
+                        while (index < parameter.Length && parameter[index] is not ',' && !char.IsWhiteSpace(parameter[index]))
+                        {
+                            index++;
+                        }
+
+                        value = parameter[start..index].Trim();
+                    }
+
+                    yield return KeyValuePair.Create<string, string?>(key, value);
                 }
             }
-
-            return response;
         }
 
         else if (message.Headers.Location is not null)
@@ -375,7 +320,7 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
                     return null;
                 }
 
-                return Uri.UnescapeDataString(value.Replace("+", "%20"));
+                return Uri.UnescapeDataString(value.Replace("+", "%20", StringComparison.Ordinal));
             }
 
             // Note: a dictionary is deliberately not used here to allow multiple parameters with the
@@ -386,19 +331,19 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
             foreach (var element in new StringTokenizer(payload, Separators.Ampersand))
             {
                 var segment = element;
-                if (segment.Length == 0)
+                if (!segment.HasValue || segment.Length is 0)
                 {
                     continue;
                 }
 
                 // Always skip the first char (# or ?).
-                if (segment.Offset == 0)
+                if (segment.Offset is 0)
                 {
                     segment = segment.Subsegment(1, segment.Length - 1);
                 }
 
                 var index = segment.IndexOf('=');
-                if (index == -1)
+                if (index is -1)
                 {
                     continue;
                 }
@@ -411,33 +356,36 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
 
                 var value = UnescapeDataString(segment.Substring(index + 1, segment.Length - (index + 1)));
 
-                parameters.Add(new KeyValuePair<string, string?>(name, value));
+                parameters.Add(KeyValuePair.Create(name, value));
             }
 
-            return new OpenIddictResponse(
-                from parameter in parameters
-                group parameter by parameter.Key into grouping
-                let values = grouping.Select(parameter => parameter.Value)
-                select new KeyValuePair<string, StringValues>(grouping.Key, values.ToArray()));
+            return new OpenIddictResponse(parameters
+                .GroupBy(static parameter => parameter.Key, static parameter => parameter.Value, StringComparer.Ordinal)
+                .Select(static grouping => KeyValuePair.Create(grouping.Key, new StringValues([.. grouping]))));
         }
 
-        else if (string.Equals(message.Content?.Headers?.ContentType?.MediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(message.Content.Headers.ContentType?.MediaType, "application/json", StringComparison.OrdinalIgnoreCase))
         {
-            return (await message.Content!.ReadFromJsonAsync<OpenIddictResponse>())!;
+            return (await message.Content.ReadFromJsonAsync<OpenIddictResponse>())!;
         }
 
-        else if (string.Equals(message.Content?.Headers?.ContentType?.MediaType, "text/html", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(message.Content.Headers.ContentType?.MediaType, "text/html", StringComparison.OrdinalIgnoreCase))
         {
             // Note: this test client is only used with OpenIddict's ASP.NET Core or OWIN hosts,
             // that always return their HTTP responses encoded using UTF-8. As such, the stream
             // returned by ReadAsStreamAsync() is always assumed to contain UTF-8 encoded payloads.
-            using var stream = await message.Content!.ReadAsStreamAsync();
+            using var stream = await message.Content.ReadAsStreamAsync();
+
             using var document = await HtmlParser.ParseDocumentAsync(stream);
+            if (document.Body is null)
+            {
+                return new OpenIddictResponse();
+            }
 
             // Note: a dictionary is deliberately not used here to allow multiple parameters with the
             // same name to be retrieved. While initially not allowed by the core OAuth2 specification,
             // this is required for derived drafts like the OAuth2 token exchange specification.
-            var parameters = new List<KeyValuePair<string, string>>();
+            var parameters = new List<KeyValuePair<string, string?>>();
 
             foreach (var element in document.Body.GetElementsByTagName("input"))
             {
@@ -449,22 +397,20 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
 
                 var value = element.GetAttribute("value");
 
-                parameters.Add(new KeyValuePair<string, string>(name, value));
+                parameters.Add(KeyValuePair.Create(name, value));
             }
 
-            return new OpenIddictResponse(
-                from parameter in parameters
-                group parameter by parameter.Key into grouping
-                let values = grouping.Select(parameter => parameter.Value)
-                select new KeyValuePair<string, StringValues>(grouping.Key, values.ToArray()));
+            return new OpenIddictResponse(parameters
+                .GroupBy(static parameter => parameter.Key, static parameter => parameter.Value, StringComparer.Ordinal)
+                .Select(static grouping => KeyValuePair.Create(grouping.Key, new StringValues([.. grouping]))));
         }
 
-        else if (string.Equals(message.Content?.Headers?.ContentType?.MediaType, "text/plain", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(message.Content.Headers.ContentType?.MediaType, "text/plain", StringComparison.OrdinalIgnoreCase))
         {
             // Note: this test client is only used with OpenIddict's ASP.NET Core or OWIN hosts,
             // that always return their HTTP responses encoded using UTF-8. As such, the stream
             // returned by ReadAsStreamAsync() is always assumed to contain UTF-8 encoded payloads.
-            using var stream = await message.Content!.ReadAsStreamAsync();
+            using var stream = await message.Content.ReadAsStreamAsync();
             using var reader = new StreamReader(stream);
 
             // Note: a dictionary is deliberately not used here to allow multiple parameters with the
@@ -474,28 +420,26 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
 
             for (var line = await reader.ReadLineAsync(); line is not null; line = await reader.ReadLineAsync())
             {
-                var index = line.IndexOf(':');
-                if (index == -1)
+                var index = line.IndexOf(':', StringComparison.Ordinal);
+                if (index is -1)
                 {
                     continue;
                 }
 
-                var name = line.Substring(0, index);
+                var name = line[..index];
                 if (string.IsNullOrEmpty(name))
                 {
                     continue;
                 }
 
-                var value = line.Substring(index + 1);
+                var value = line[(index + 1)..];
 
-                parameters.Add(new KeyValuePair<string, string>(name, value));
+                parameters.Add(KeyValuePair.Create(name, value));
             }
 
-            return new OpenIddictResponse(
-                from parameter in parameters
-                group parameter by parameter.Key into grouping
-                let values = grouping.Select(parameter => parameter.Value)
-                select new KeyValuePair<string, StringValues>(grouping.Key, values.ToArray()));
+            return new OpenIddictResponse(parameters
+                .GroupBy(static parameter => parameter.Key, static parameter => parameter.Value, StringComparer.Ordinal)
+                .Select(static grouping => KeyValuePair.Create(grouping.Key, new StringValues([.. grouping]))));
         }
 
         return new OpenIddictResponse();
@@ -505,6 +449,6 @@ public class OpenIddictServerIntegrationTestClient : IAsyncDisposable
     {
         HttpClient.Dispose();
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 }

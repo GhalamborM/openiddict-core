@@ -1,5 +1,6 @@
-using System.Globalization;
 using System.Reflection;
+using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -12,6 +13,17 @@ namespace OpenIddict.Server.Tests;
 
 public class OpenIddictServerBuilderTests
 {
+    [Fact]
+    public void ValidateOnStart_CanBeInvoked()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        Assert.Same(builder, builder.ValidateOnStart());
+    }
+
     [Fact]
     public void Constructor_ThrowsAnExceptionForNullServices()
     {
@@ -82,7 +94,7 @@ public class OpenIddictServerBuilderTests
         Assert.Contains(services, service =>
             service.ServiceType == typeof(CustomHandler) &&
             service.ImplementationInstance?.GetType() == typeof(CustomHandler) &&
-            service.Lifetime == ServiceLifetime.Singleton);
+            service.Lifetime is ServiceLifetime.Singleton);
     }
 
     [Fact]
@@ -101,7 +113,7 @@ public class OpenIddictServerBuilderTests
         // Assert
         Assert.Contains(services, service =>
             service.ServiceType == typeof(CustomHandler) &&
-            service.Lifetime == ServiceLifetime.Singleton);
+            service.Lifetime is ServiceLifetime.Singleton);
     }
 
     [Fact]
@@ -120,7 +132,7 @@ public class OpenIddictServerBuilderTests
         // Assert
         Assert.Contains(services, service =>
             service.ServiceType == typeof(CustomHandler) &&
-            service.Lifetime == ServiceLifetime.Scoped);
+            service.Lifetime is ServiceLifetime.Scoped);
     }
 
     [Fact]
@@ -133,6 +145,27 @@ public class OpenIddictServerBuilderTests
         // Act and assert
         var exception = Assert.Throws<ArgumentNullException>(() => builder.AddEncryptionCredentials(credentials: null!));
         Assert.Equal("credentials", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddEncryptionCredentials_EncryptingCredentialsAreCorrectlyAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        var credentials = new EncryptingCredentials(
+            Mock.Of<SecurityKey>(key => key.KeySize == 256),
+            SecurityAlgorithms.Aes256KW,
+            SecurityAlgorithms.Aes256CbcHmacSha512);
+
+        // Act
+        builder.AddEncryptionCredentials(credentials);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Same(credentials, options.EncryptionCredentials[0]);
     }
 
     [Fact]
@@ -202,6 +235,74 @@ public class OpenIddictServerBuilderTests
         var key = Mock.Of<SecurityKey>(mock => mock.KeySize == 384 && mock.IsSupportedAlgorithm(SecurityAlgorithms.Aes256KW));
         var exception = Assert.Throws<InvalidOperationException>(() => builder.AddEncryptionKey(key));
         Assert.Equal(SR.FormatID0283(256, 384), exception.Message);
+    }
+
+    [Fact]
+    public void AddEncryptionKey_UsesRsaOaepWhenSupported()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        var key = Mock.Of<SecurityKey>(mock => mock.IsSupportedAlgorithm(SecurityAlgorithms.RsaOAEP));
+
+        // Act
+        builder.AddEncryptionKey(key);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(SecurityAlgorithms.RsaOAEP, options.EncryptionCredentials[0].Alg);
+    }
+
+    [Fact]
+    public void AddEncryptionKey_ThrowsExceptionWhenNoSupportedAlgorithmIsFound()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        var key = Mock.Of<SecurityKey>(mock =>
+            !mock.IsSupportedAlgorithm(SecurityAlgorithms.Aes256KW) &&
+            !mock.IsSupportedAlgorithm(SecurityAlgorithms.RsaOAEP));
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddEncryptionKey(key));
+        Assert.Equal(SR.GetResourceString(SR.ID0056), exception.Message);
+    }
+
+    [Fact]
+    public void AddEncryptionKeys_ThrowsExceptionWhenKeysAreNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddEncryptionKeys(keys: null!));
+        Assert.Equal("keys", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddEncryptionKeys_KeysAreCorrectlyAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        var keys = new SecurityKey[]
+        {
+            Mock.Of<SecurityKey>(mock => mock.KeySize == 256 && mock.IsSupportedAlgorithm(SecurityAlgorithms.Aes256KW)),
+            Mock.Of<SecurityKey>(mock => mock.IsSupportedAlgorithm(SecurityAlgorithms.RsaOAEP))
+        };
+
+        // Act
+        builder.AddEncryptionKeys(keys);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(2, options.EncryptionCredentials.Count);
     }
 
     [Fact]
@@ -276,7 +377,220 @@ public class OpenIddictServerBuilderTests
         Assert.Equal("subject", exception.ParamName);
     }
 
-#if SUPPORTS_CERTIFICATE_GENERATION
+    [Fact]
+    public void AddEphemeralEncryptionKey_ThrowsAnExceptionForNullOrEmptyAlgorithm()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var nullException = Assert.ThrowsAny<ArgumentException>(() => builder.AddEphemeralEncryptionKey(algorithm: null!));
+        var emptyException = Assert.ThrowsAny<ArgumentException>(() => builder.AddEphemeralEncryptionKey(string.Empty));
+
+        Assert.Equal("algorithm", nullException.ParamName);
+        Assert.Equal("algorithm", emptyException.ParamName);
+    }
+
+    [Fact]
+    public void AddEphemeralEncryptionKey_DefaultAlgorithmIsRsaOaep()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.AddEphemeralEncryptionKey();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(SecurityAlgorithms.RsaOAEP, options.EncryptionCredentials[0].Alg);
+    }
+
+    [Theory]
+    [InlineData(SecurityAlgorithms.Aes256KW)]
+    [InlineData(SecurityAlgorithms.RsaOAEP)]
+    [InlineData(SecurityAlgorithms.RsaOaepKeyWrap)]
+    public void AddEphemeralEncryptionKey_EncryptionCredentialsUseSpecifiedAlgorithm(string algorithm)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.AddEphemeralEncryptionKey(algorithm);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(algorithm, options.EncryptionCredentials[0].Alg);
+    }
+
+    [Fact]
+    public void AddEphemeralEncryptionKey_ThrowsExceptionForUnsupportedAlgorithm()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddEphemeralEncryptionKey("unsupported"));
+        Assert.Equal(SR.GetResourceString(SR.ID0058), exception.Message);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_ThrowsAnExceptionForNullCertificate()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddEncryptionCertificate(certificate: null!));
+        Assert.Equal("certificate", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_ThrowsExceptionWhenPrivateKeyIsMissing()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        using var certificate = CreateEncryptionCertificate(includePrivateKey: false);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddEncryptionCertificate(certificate));
+        Assert.Equal(SR.GetResourceString(SR.ID0061), exception.Message);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_ThrowsExceptionWhenKeyUsageIsInvalid()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        using var certificate = CreateCertificate(X509KeyUsageFlags.DigitalSignature, includePrivateKey: true);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddEncryptionCertificate(certificate));
+        Assert.Equal(SR.GetResourceString(SR.ID0060), exception.Message);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_Stream_ThrowsExceptionWhenStreamIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddEncryptionCertificate(stream: null!, password: "password"));
+        Assert.Equal("stream", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_Stream_ThrowsExceptionWhenContentTypeIsInvalid()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        using var stream = new MemoryStream([0x01, 0x02, 0x03]);
+
+        // Act and assert
+        Assert.ThrowsAny<Exception>(() => builder.AddEncryptionCertificate(stream, "password", X509KeyStorageFlags.Exportable));
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_Stream_CertificateIsCorrectlyAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        using var certificate = CreateEncryptionCertificate(includePrivateKey: true);
+        var payload = certificate.Export(X509ContentType.Pfx, "password");
+        using var stream = new MemoryStream(payload);
+
+        // Act
+        builder.AddEncryptionCertificate(stream, "password", X509KeyStorageFlags.Exportable);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.IsType<X509SecurityKey>(options.EncryptionCredentials[0].Key);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_Assembly_ThrowsExceptionWhenAssemblyIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddEncryptionCertificate(
+            assembly: null!, resource: "resource", password: "password", flags: X509KeyStorageFlags.Exportable));
+
+        Assert.Equal("assembly", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_Assembly_ThrowsExceptionWhenResourceIsNullOrEmpty()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var assembly = typeof(OpenIddictServerBuilderTests).GetTypeInfo().Assembly;
+
+        // Act and assert
+        var nullException = Assert.ThrowsAny<ArgumentException>(() => builder.AddEncryptionCertificate(
+            assembly, resource: null!, password: "password", flags: X509KeyStorageFlags.Exportable));
+        var emptyException = Assert.ThrowsAny<ArgumentException>(() => builder.AddEncryptionCertificate(
+            assembly, resource: string.Empty, password: "password", flags: X509KeyStorageFlags.Exportable));
+
+        Assert.Equal("resource", nullException.ParamName);
+        Assert.Equal("resource", emptyException.ParamName);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificate_Assembly_ThrowsExceptionWhenResourceCannotBeFound()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var assembly = typeof(OpenIddictServerBuilderTests).GetTypeInfo().Assembly;
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddEncryptionCertificate(
+            assembly, resource: "missing.pfx", password: "password", flags: X509KeyStorageFlags.Exportable));
+
+        Assert.Equal(SR.GetResourceString(SR.ID0064), exception.Message);
+    }
+
+    [SkippableFact, UnsupportedOSPlatform("linux")]
+    public void AddEncryptionCertificate_ThrowsExceptionWhenCertificateCannotBeFoundInStores()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddEncryptionCertificate(Guid.NewGuid().ToString("N")));
+        Assert.Equal(SR.GetResourceString(SR.ID0066), exception.Message);
+    }
+
+    [Fact]
+    public void AddEncryptionCertificates_ThrowsExceptionWhenCertificatesAreNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddEncryptionCertificates(certificates: null!));
+        Assert.Equal("certificates", exception.ParamName);
+    }
+
     [Fact]
     public void AddDevelopmentEncryptionCertificate_CanGenerateCertificate()
     {
@@ -290,26 +604,11 @@ public class OpenIddictServerBuilderTests
         var options = GetOptions(services);
 
         // Assert
-        Assert.Single(options.EncryptionCredentials);
+        Assert.NotEmpty(options.EncryptionCredentials);
         Assert.Equal(SecurityAlgorithms.RsaOAEP, options.EncryptionCredentials[0].Alg);
         Assert.Equal(SecurityAlgorithms.Aes256CbcHmacSha512, options.EncryptionCredentials[0].Enc);
         Assert.NotNull(options.EncryptionCredentials[0].Key.KeyId);
     }
-#else
-    [Fact]
-    public void AddDevelopmentEncryptionCertificate_ThrowsAnExceptionOnUnsupportedPlatforms()
-    {
-        // Arrange
-        var services = CreateServices();
-        var builder = CreateBuilder(services);
-
-        // Act and assert
-        var exception = Assert.Throws<PlatformNotSupportedException>(() => builder.AddDevelopmentEncryptionCertificate(
-            subject: new X500DistinguishedName("CN=" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture))));
-
-        Assert.Equal("X.509 certificate generation is not supported on this platform.", exception.Message);
-    }
-#endif
 
     [Fact]
     public void AddDevelopmentSigningCertificate_ThrowsAnExceptionForNullSubject()
@@ -327,7 +626,35 @@ public class OpenIddictServerBuilderTests
         Assert.Equal("subject", exception.ParamName);
     }
 
-#if SUPPORTS_CERTIFICATE_GENERATION
+    [Fact]
+    public void AddSigningCredentials_ThrowsExceptionWhenCredentialsAreNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddSigningCredentials(credentials: null!));
+        Assert.Equal("credentials", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddSigningCredentials_SigningCredentialsAreCorrectlyAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var credentials = new SigningCredentials(Mock.Of<SecurityKey>(), SecurityAlgorithms.HmacSha256);
+
+        // Act
+        builder.AddSigningCredentials(credentials);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Same(credentials, options.SigningCredentials[0]);
+    }
+
     [Fact]
     public void AddDevelopmentSigningCertificate_CanGenerateCertificate()
     {
@@ -341,25 +668,10 @@ public class OpenIddictServerBuilderTests
         var options = GetOptions(services);
 
         // Assert
-        Assert.Single(options.SigningCredentials);
+        Assert.NotEmpty(options.SigningCredentials);
         Assert.Equal(SecurityAlgorithms.RsaSha256, options.SigningCredentials[0].Algorithm);
         Assert.NotNull(options.SigningCredentials[0].Kid);
     }
-#else
-    [Fact]
-    public void AddDevelopmentSigningCertificate_ThrowsAnExceptionOnUnsupportedPlatforms()
-    {
-        // Arrange
-        var services = CreateServices();
-        var builder = CreateBuilder(services);
-
-        // Act and assert
-        var exception = Assert.Throws<PlatformNotSupportedException>(() => builder.AddDevelopmentSigningCertificate(
-            subject: new X500DistinguishedName("CN=" + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture))));
-
-        Assert.Equal("X.509 certificate generation is not supported on this platform.", exception.Message);
-    }
-#endif
 
     [Fact]
     public void AddEphemeralSigningKey_SigningKeyIsCorrectlyAdded()
@@ -377,15 +689,16 @@ public class OpenIddictServerBuilderTests
         Assert.Single(options.SigningCredentials);
     }
 
-    [Theory]
+    [SkippableTheory(typeof(PlatformNotSupportedException))]
     [InlineData(SecurityAlgorithms.RsaSha256)]
     [InlineData(SecurityAlgorithms.RsaSha384)]
     [InlineData(SecurityAlgorithms.RsaSha512)]
-#if SUPPORTS_ECDSA
     [InlineData(SecurityAlgorithms.EcdsaSha256)]
     [InlineData(SecurityAlgorithms.EcdsaSha384)]
     [InlineData(SecurityAlgorithms.EcdsaSha512)]
-#endif
+    [InlineData(SecurityAlgorithms.MlDsa44)]
+    [InlineData(SecurityAlgorithms.MlDsa65)]
+    [InlineData(SecurityAlgorithms.MlDsa87)]
     public void AddEphemeralSigningKey_SigningCredentialsUseSpecifiedAlgorithm(string algorithm)
     {
         // Arrange
@@ -430,11 +743,12 @@ public class OpenIddictServerBuilderTests
     [Theory]
     [InlineData(SecurityAlgorithms.HmacSha256)]
     [InlineData(SecurityAlgorithms.RsaSha256)]
-#if SUPPORTS_ECDSA
     [InlineData(SecurityAlgorithms.EcdsaSha256)]
     [InlineData(SecurityAlgorithms.EcdsaSha384)]
     [InlineData(SecurityAlgorithms.EcdsaSha512)]
-#endif
+    [InlineData(SecurityAlgorithms.MlDsa44)]
+    [InlineData(SecurityAlgorithms.MlDsa65)]
+    [InlineData(SecurityAlgorithms.MlDsa87)]
     public void AddSigningKey_SigningKeyIsCorrectlyAdded(string algorithm)
     {
         // Arrange
@@ -450,6 +764,254 @@ public class OpenIddictServerBuilderTests
 
         // Assert
         Assert.Same(key, options.SigningCredentials[0].Key);
+    }
+
+    [Fact]
+    public void AddSigningKey_ThrowsExceptionWhenNoSupportedAlgorithmIsFound()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var key = Mock.Of<SecurityKey>(mock =>
+            !mock.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha256) &&
+            !mock.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha384) &&
+            !mock.IsSupportedAlgorithm(SecurityAlgorithms.EcdsaSha512) &&
+            !mock.IsSupportedAlgorithm(SecurityAlgorithms.HmacSha256) &&
+            !mock.IsSupportedAlgorithm(SecurityAlgorithms.RsaSha256));
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddSigningKey(key));
+        Assert.Equal(SR.GetResourceString(SR.ID0068), exception.Message);
+    }
+
+    [Fact]
+    public void AddSigningKeys_ThrowsExceptionWhenKeysAreNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddSigningKeys(keys: null!));
+        Assert.Equal("keys", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddSigningKeys_KeysAreCorrectlyAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        var keys = new SecurityKey[]
+        {
+            Mock.Of<SecurityKey>(mock => mock.IsSupportedAlgorithm(SecurityAlgorithms.HmacSha256)),
+            Mock.Of<SecurityKey>(mock => mock.IsSupportedAlgorithm(SecurityAlgorithms.RsaSha256))
+        };
+
+        // Act
+        builder.AddSigningKeys(keys);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(2, options.SigningCredentials.Count);
+    }
+
+    [Fact]
+    public void AddEphemeralSigningKey_ThrowsAnExceptionForNullOrEmptyAlgorithm()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var nullException = Assert.ThrowsAny<ArgumentException>(() => builder.AddEphemeralSigningKey(algorithm: null!));
+        var emptyException = Assert.ThrowsAny<ArgumentException>(() => builder.AddEphemeralSigningKey(string.Empty));
+
+        Assert.Equal("algorithm", nullException.ParamName);
+        Assert.Equal("algorithm", emptyException.ParamName);
+    }
+
+    [Fact]
+    public void AddEphemeralSigningKey_DefaultSigningAlgorithmIsRsaSha256()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.AddEphemeralSigningKey();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Single(options.SigningCredentials);
+        Assert.Equal(SecurityAlgorithms.RsaSha256, options.SigningCredentials[0].Algorithm);
+    }
+
+    [Fact]
+    public void AddEphemeralSigningKey_ThrowsExceptionForUnsupportedAlgorithm()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddEphemeralSigningKey("unsupported"));
+        Assert.Equal(SR.GetResourceString(SR.ID0058), exception.Message);
+    }
+
+    [Fact]
+    public void AddSigningCertificate_ThrowsAnExceptionForNullCertificate()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddSigningCertificate(certificate: null!));
+        Assert.Equal("certificate", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddSigningCertificate_ThrowsExceptionWhenPrivateKeyIsMissing()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        using var certificate = CreateSigningCertificate(includePrivateKey: false);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddSigningCertificate(certificate));
+        Assert.Equal(SR.GetResourceString(SR.ID0061), exception.Message);
+    }
+
+    [Fact]
+    public void AddSigningCertificate_ThrowsExceptionWhenKeyUsageIsInvalid()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        using var certificate = CreateCertificate(X509KeyUsageFlags.KeyEncipherment, includePrivateKey: true);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddSigningCertificate(certificate));
+        Assert.Equal(SR.GetResourceString(SR.ID0070), exception.Message);
+    }
+
+    [Fact]
+    public void AddSigningCertificate_Stream_ThrowsExceptionWhenStreamIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddSigningCertificate(stream: null!, password: "password"));
+        Assert.Equal("stream", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddSigningCertificate_Stream_ThrowsExceptionWhenContentTypeIsInvalid()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        using var stream = new MemoryStream([0x01, 0x02, 0x03]);
+
+        // Act and assert
+        Assert.ThrowsAny<Exception>(() => builder.AddSigningCertificate(stream, "password", X509KeyStorageFlags.Exportable));
+    }
+
+    [Fact]
+    public void AddSigningCertificate_Stream_CertificateIsCorrectlyAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        using var certificate = CreateSigningCertificate(includePrivateKey: true);
+        var payload = certificate.Export(X509ContentType.Pfx, "password");
+        using var stream = new MemoryStream(payload);
+
+        // Act
+        builder.AddSigningCertificate(stream, "password", X509KeyStorageFlags.Exportable);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.IsType<X509SecurityKey>(options.SigningCredentials[0].Key);
+    }
+
+    [Fact]
+    public void AddSigningCertificate_Assembly_ThrowsExceptionWhenAssemblyIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddSigningCertificate(
+            assembly: null!, resource: "resource", password: "password", flags: X509KeyStorageFlags.Exportable));
+
+        Assert.Equal("assembly", exception.ParamName);
+    }
+
+    [Fact]
+    public void AddSigningCertificate_Assembly_ThrowsExceptionWhenResourceIsNullOrEmpty()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var assembly = typeof(OpenIddictServerBuilderTests).GetTypeInfo().Assembly;
+
+        // Act and assert
+        var nullException = Assert.ThrowsAny<ArgumentException>(() => builder.AddSigningCertificate(
+            assembly, resource: null!, password: "password", flags: X509KeyStorageFlags.Exportable));
+        var emptyException = Assert.ThrowsAny<ArgumentException>(() => builder.AddSigningCertificate(
+            assembly, resource: string.Empty, password: "password", flags: X509KeyStorageFlags.Exportable));
+
+        Assert.Equal("resource", nullException.ParamName);
+        Assert.Equal("resource", emptyException.ParamName);
+    }
+
+    [Fact]
+    public void AddSigningCertificate_Assembly_ThrowsExceptionWhenResourceCannotBeFound()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var assembly = typeof(OpenIddictServerBuilderTests).GetTypeInfo().Assembly;
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddSigningCertificate(
+            assembly, resource: "missing.pfx", password: "password", flags: X509KeyStorageFlags.Exportable));
+
+        Assert.Equal(SR.GetResourceString(SR.ID0064), exception.Message);
+    }
+
+    [SkippableFact, UnsupportedOSPlatform("linux")]
+    public void AddSigningCertificate_ThrowsExceptionWhenCertificateCannotBeFoundInStores()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddSigningCertificate(Guid.NewGuid().ToString("N")));
+        Assert.Equal(SR.GetResourceString(SR.ID0066), exception.Message);
+    }
+
+    [Fact]
+    public void AddSigningCertificates_ThrowsExceptionWhenCertificatesAreNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddSigningCertificates(certificates: null!));
+        Assert.Equal("certificates", exception.ParamName);
     }
 
     [Fact]
@@ -484,13 +1046,7 @@ public class OpenIddictServerBuilderTests
         var options = GetOptions(services);
 
         // Assert
-        Assert.Contains(CodeChallengeMethods.Sha256, options.CodeChallengeMethods);
-
         Assert.Contains(GrantTypes.AuthorizationCode, options.GrantTypes);
-
-        Assert.Contains(ResponseModes.FormPost, options.ResponseModes);
-        Assert.Contains(ResponseModes.Fragment, options.ResponseModes);
-        Assert.Contains(ResponseModes.Query, options.ResponseModes);
 
         Assert.Contains(ResponseTypes.Code, options.ResponseTypes);
     }
@@ -514,17 +1070,37 @@ public class OpenIddictServerBuilderTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public void AllowCustomFlow_ThrowsAnExceptionForType(string type)
+    public void AllowCustomFlow_ThrowsAnExceptionForType(string? type)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.AllowCustomFlow(type));
+        var exception = Assert.ThrowsAny<ArgumentException>(() => builder.AllowCustomFlow(type!));
 
         Assert.Equal("type", exception.ParamName);
-        Assert.Contains("The grant type cannot be null or empty.", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(GrantTypes.AuthorizationCode)]
+    [InlineData(GrantTypes.ClientCredentials)]
+    [InlineData(GrantTypes.DeviceCode)]
+    [InlineData(GrantTypes.Implicit)]
+    [InlineData(GrantTypes.Password)]
+    [InlineData(GrantTypes.RefreshToken)]
+    [InlineData(GrantTypes.TokenExchange)]
+    public void AllowCustomFlow_ThrowsAnExceptionForStandardGrantType(string type)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.ThrowsAny<ArgumentException>(() => builder.AllowCustomFlow(type));
+
+        Assert.Equal("type", exception.ParamName);
+        Assert.StartsWith(SR.FormatID0517(type), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -544,14 +1120,14 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
-    public void AddDeviceCodeFlow_DeviceFlowIsAdded()
+    public void AddDeviceAuthorizationFlow_DeviceFlowIsAdded()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.AllowDeviceCodeFlow();
+        builder.AllowDeviceAuthorizationFlow();
 
         var options = GetOptions(services);
 
@@ -572,13 +1148,8 @@ public class OpenIddictServerBuilderTests
         var options = GetOptions(services);
 
         // Assert
-        Assert.Contains(CodeChallengeMethods.Sha256, options.CodeChallengeMethods);
-
         Assert.Contains(GrantTypes.AuthorizationCode, options.GrantTypes);
         Assert.Contains(GrantTypes.Implicit, options.GrantTypes);
-
-        Assert.Contains(ResponseModes.FormPost, options.ResponseModes);
-        Assert.Contains(ResponseModes.Fragment, options.ResponseModes);
 
         Assert.Contains(ResponseTypes.Code + ' ' + ResponseTypes.IdToken, options.ResponseTypes);
         Assert.Contains(ResponseTypes.Code + ' ' + ResponseTypes.IdToken + ' ' + ResponseTypes.Token, options.ResponseTypes);
@@ -599,9 +1170,6 @@ public class OpenIddictServerBuilderTests
 
         // Assert
         Assert.Contains(GrantTypes.Implicit, options.GrantTypes);
-
-        Assert.Contains(ResponseModes.FormPost, options.ResponseModes);
-        Assert.Contains(ResponseModes.Fragment, options.ResponseModes);
 
         Assert.Contains(ResponseTypes.IdToken, options.ResponseTypes);
         Assert.Contains(ResponseTypes.IdToken + ' ' + ResponseTypes.Token, options.ResponseTypes);
@@ -641,6 +1209,22 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
+    public void AllowTokenExchangeFlow_TokenExchangeFlowIsAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.AllowTokenExchangeFlow();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Contains(GrantTypes.TokenExchange, options.GrantTypes);
+    }
+
+    [Fact]
     public void DisableAccessTokenEncryption_AccessTokenEncryptionIsDisabled()
     {
         // Arrange
@@ -657,6 +1241,22 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
+    public void DisableAudienceValidation_AudienceValidationIsDisabled()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.DisableAudienceValidation();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.DisableAudienceValidation);
+    }
+
+    [Fact]
     public void DisableAuthorizationStorage_AuthorizationStorageIsDisabled()
     {
         // Arrange
@@ -670,6 +1270,22 @@ public class OpenIddictServerBuilderTests
 
         // Assert
         Assert.True(options.DisableAuthorizationStorage);
+    }
+
+    [Fact]
+    public void DisableResourceValidation_ResourceValidationIsDisabled()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.DisableResourceValidation();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.DisableResourceValidation);
     }
 
     [Fact]
@@ -737,6 +1353,492 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
+    public void EnablePublicKeyInfrastructureTlsClientAuthentication_ThrowsAnExceptionForNullCertificates()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            builder.EnablePublicKeyInfrastructureTlsClientAuthentication(certificates: null!));
+
+        Assert.Equal("certificates", exception.ParamName);
+    }
+
+#if NET
+    [Fact]
+    public void EnablePublicKeyInfrastructureTlsClientAuthentication_ThrowsAnExceptionWhenNoRootCertificateProvided()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var certificates = new X509Certificate2Collection
+        {
+            // Intermediate certificate:
+            X509Certificate2.CreateFromPem($"""
+                -----BEGIN CERTIFICATE-----
+                MIIFRDCCAyygAwIBAgIRALpTKvDtz6lGPaqNaK8aULowDQYJKoZIhvcNAQELBQAw
+                EjEQMA4GA1UEAxMHUm9vdCBDQTAgFw0yNjAxMzAxNzM4NTVaGA8yMTI2MDEzMTE3
+                Mzg1NVowGjEYMBYGA1UEAxMPSW50ZXJtZWRpYXRlIENBMIICIjANBgkqhkiG9w0B
+                AQEFAAOCAg8AMIICCgKCAgEAvHiS4aNz7vL5mOJNjbpybcK75RhH1sXifLwKW8Zg
+                nHm+KjdRENf3X9yp7c+xNrtpHhG4/gp8M++0G1Cz4Yvq8idZu8IpMiqk9/KT447b
+                VocaRPCFC4NIC9U6g4s3rwHLUr2wMCAWiM9yjWcbXcvIlnSuA/i/lSAfAUPjrn8X
+                LLDgqlEkInmWRvYvDmdmw7vdqfDobFTDh0YRWB/y/LuDvkPFBDg3cfY8+AyrDkha
+                y3m1Ot3NTsg0O/HOL6MXMN9HRd4vX37XBV88kZtFE+vyHdYDs2NzGjAbfz4JZ6xz
+                4+weUjklOc9ucAEgfAnwijH9w4KFBJEHAqtOMsbrIy74MvPTFj3LeayLo5nhLeqp
+                GbqvJcEX1UM83vFt+JUaDVbXDUG2ECHMDe6W5r5eYQtZW1ErKkRYNTJu++I0vDZr
+                EeZdYDYp15dbksMXUDyzhJ0WS0N23b7s57S6YAbok97UD/d+aGMtY3kJ/wIiftYY
+                Sel/MO/QXrgNchnVtUbShgE2oFvAJUYRvlZarG9/egp3Jb3B4WNjwIyzaT6SFtnG
+                Tg+IEXYPE2s5x4YZ8GINygWKrDbV7UuANRjKvoBlGmcrW/iz2Aaa+H5696p1HLVA
+                k7gXTw7WlJxzP6JPs2ZjWu27k88oAUV8HJjzFzGUsRPIjkf8KcJuxAqwLPoqFelh
+                uNECAwEAAaOBijCBhzASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIB
+                BjAdBgNVHQ4EFgQUq7mtVl4BCJyLWTHEpSCqokobTCcwQgYDVR0jBDswOYAUKv1o
+                4gZNED0vspeWdqb0WeS3N06hFqQUMBIxEDAOBgNVBAMTB1Jvb3QgQ0GCCQDNRQQ8
+                F7il/DANBgkqhkiG9w0BAQsFAAOCAgEArlp0WSTwHgv8wgI+XT/QNxUQBiVyrHql
+                SHIMCBA7rDPPsl2RURWzQDE7zqovA3r7fnrYMfVXAAdgzXhDLQwL15RdaeoZUsjH
+                xN4y5Mtn0zv1yp7PPtZUc0mZ4Q0xWo4MPve82IfhiqWXretUxvcZ4NKY3sni0s8W
+                hViZdHH77vVIWWcWK414cpRwvsDtaKkgS4h8yHiUOtlgKgTViyUd0ovphR0boLtF
+                Ddw+jmLGM9c5keIs87RCTqCcHD4nP81kHHUaE60NDMtHH5UONSA5ecsHo11tC1am
+                9U2TRs5+zwyBnwy4oOE/EZxXslcz27XyAX7MOhZppue+xtEDyex4gjiS27Nl8Va1
+                R1I1vkI5A209OQQ4JXzJZcAtgWep/ez0hu8TOkdtn0l/6aGkj2l3iwVG8edjiwSz
+                nVSPaBFKRtrHPuk9uEqu1xtP2klMeJEs7a5bVOyBOzZksafDwVTSPdRnDJDxo/Rx
+                bGzSWWYqKNsDxyV9aVMZ1iABW2O7qh6eXbioICzWAWQyplLeihnZ1d0o0h9gk/Kt
+                dPuLATo/WSXBA3oDfdEjjEWhmEdj6mR92KrOTQUF7JkOM74ZGs/lCxXsCOva7Z0N
+                kZmmpiU3Dewr11+SUxGx8g/4Ba1FhW9pXI9jSYguzY1KY210nF2P5YLsz/HgIM2r
+                SVA+QXhvcj0=
+                -----END CERTIFICATE-----
+                """)
+        };
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            builder.EnablePublicKeyInfrastructureTlsClientAuthentication(certificates));
+
+        Assert.Equal("certificates", exception.ParamName);
+    }
+
+    [Fact]
+    public void EnablePublicKeyInfrastructureTlsClientAuthentication_ThrowsAnExceptionWhenEndCertificateProvided()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var certificates = new X509Certificate2Collection
+        {
+            // Root certificate:
+            X509Certificate2.CreateFromPem($"""
+                -----BEGIN CERTIFICATE-----
+                MIIE7jCCAtagAwIBAgIJAM1FBDwXuKX8MA0GCSqGSIb3DQEBCwUAMBIxEDAOBgNV
+                BAMTB1Jvb3QgQ0EwIBcNMjYwMTMwMTczODU1WhgPMjEyNjAxMzExNzM4NTVaMBIx
+                EDAOBgNVBAMTB1Jvb3QgQ0EwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoIC
+                AQDt/Nz3V5bKbYrJoITYrk3dL9CF+rDcMM6VyJ1pj33feXMTCcRJXkydKDc25sX+
+                2C/yrx75zxcUBRoWzsg++YdHJffcZI0+6Q7XBOndNKflCL8lBihvT/EUO9MQYRWV
+                495ie3deXoVGebrl6XbGAfm755Ml8KikYFryU6WOxApfQxjcKxnQLNLCTkIyn3WE
+                lzce9awtECPgdQfjDzCmE32xXMQcn/0HQUDxiyGvBQbBf8ZM9h3iJz4VGGVQkE7m
+                Ix15CwjAyrPc7jGAnUx00QGOCGzfT4bQaHOAZMgEJ8/KJhmx0Fmd6KR1fNJDqDvx
+                JYW683y1P512QZgN16e2ZEOdg9fsuXV/PaS6NmHOh7s/hwZsoIf3CJ5dX/M1h1BA
+                4buxlvRfeZdANQHJLuQFPC4DQ8SWgbxXhL8KCo0jS9rUPTaxikL7+prFK/t39YFt
+                LzowUL8d+sMvUrn3v9yXb363wBB7fja1ZG1EOl7r2YO1uGleRR1ztymfRVziQ/Np
+                wRjDeBb9rWL9srPPilvo+5VsJe2a/XtfZuxMoH6vNEl04W6/iyYE4cVizwRC8GTW
+                hSHdhk2vT2/eyGSK3Cj5U74x+orHD+3XS6xHd63qB1oo+hJl2Ln/7pBAm9qFnNed
+                u6Wn/++Oi7M7nMU/ngEkbPKUfwrR/fEKQuweJaXTgiqj3QIDAQABo0UwQzASBgNV
+                HRMBAf8ECDAGAQH/AgEBMA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUKv1o4gZN
+                ED0vspeWdqb0WeS3N04wDQYJKoZIhvcNAQELBQADggIBACLp5z1zaemqoFPtQ5Sr
+                Ii2ijs03Gc52Y/Pbg1V83xg1nMa+vI4aQYc90FZnNOv7I4VAmR6I3cI5bA3tnrzB
+                /yCMOkdxiFt6W0OQPMlmlVdCbPtUqXWM3tLilRn90XYEEWZB8I1sOrk2WH7oEHmu
+                W7BC2I3igjhUDug2bl7VwdBXzRJrWFgYdhVsjRU9rx3AbZqbD/3pC9B3PcwZxTGz
+                k8wRMP/9cF49VvUFVWhp01Bol1StwgX3r6IbaamDdIJd0MvHp0ctgqL6PLRzgRRY
+                adzWX8SPlgARVCixSOkXmAGNeuNWT/Ulo0W1xaNVTvOssfx58v3lwnjoaMLi7UFA
+                tCPrLZtZYvScB0+0AjUwfIfKrHqRdP5OqJZi7PhahR39tTh9pQX63INQvKYKO583
+                iidiNDau4HU+e+ujnXR5xJdgNWtuehKRdZFlLBH0lKKXrrnPyW9YtIjCVf1zhc+L
+                VSyo/aajWKBGqyTTbM1zetGe1rah97i7/0snoh97sWHlenmSX3BQUnajLkp9ZMh0
+                vY4koR1fxIlxHnOQ7SebZ23QiWUjdmJoOXW6Bub6VhWMDY96EpMr17QiGtexbUHD
+                1nm2Z0xGwyWeyg2QSnNEAIZ6F2EeaZ6jmD/5ASXujcutNGyPwsSGkog4/Ir5Ol15
+                +3OP4DTt75BHxzMUxB6XmbYN
+                -----END CERTIFICATE-----
+                """),
+
+            // Intermediate certificate:
+            X509Certificate2.CreateFromPem($"""
+                -----BEGIN CERTIFICATE-----
+                MIIFRDCCAyygAwIBAgIRALpTKvDtz6lGPaqNaK8aULowDQYJKoZIhvcNAQELBQAw
+                EjEQMA4GA1UEAxMHUm9vdCBDQTAgFw0yNjAxMzAxNzM4NTVaGA8yMTI2MDEzMTE3
+                Mzg1NVowGjEYMBYGA1UEAxMPSW50ZXJtZWRpYXRlIENBMIICIjANBgkqhkiG9w0B
+                AQEFAAOCAg8AMIICCgKCAgEAvHiS4aNz7vL5mOJNjbpybcK75RhH1sXifLwKW8Zg
+                nHm+KjdRENf3X9yp7c+xNrtpHhG4/gp8M++0G1Cz4Yvq8idZu8IpMiqk9/KT447b
+                VocaRPCFC4NIC9U6g4s3rwHLUr2wMCAWiM9yjWcbXcvIlnSuA/i/lSAfAUPjrn8X
+                LLDgqlEkInmWRvYvDmdmw7vdqfDobFTDh0YRWB/y/LuDvkPFBDg3cfY8+AyrDkha
+                y3m1Ot3NTsg0O/HOL6MXMN9HRd4vX37XBV88kZtFE+vyHdYDs2NzGjAbfz4JZ6xz
+                4+weUjklOc9ucAEgfAnwijH9w4KFBJEHAqtOMsbrIy74MvPTFj3LeayLo5nhLeqp
+                GbqvJcEX1UM83vFt+JUaDVbXDUG2ECHMDe6W5r5eYQtZW1ErKkRYNTJu++I0vDZr
+                EeZdYDYp15dbksMXUDyzhJ0WS0N23b7s57S6YAbok97UD/d+aGMtY3kJ/wIiftYY
+                Sel/MO/QXrgNchnVtUbShgE2oFvAJUYRvlZarG9/egp3Jb3B4WNjwIyzaT6SFtnG
+                Tg+IEXYPE2s5x4YZ8GINygWKrDbV7UuANRjKvoBlGmcrW/iz2Aaa+H5696p1HLVA
+                k7gXTw7WlJxzP6JPs2ZjWu27k88oAUV8HJjzFzGUsRPIjkf8KcJuxAqwLPoqFelh
+                uNECAwEAAaOBijCBhzASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIB
+                BjAdBgNVHQ4EFgQUq7mtVl4BCJyLWTHEpSCqokobTCcwQgYDVR0jBDswOYAUKv1o
+                4gZNED0vspeWdqb0WeS3N06hFqQUMBIxEDAOBgNVBAMTB1Jvb3QgQ0GCCQDNRQQ8
+                F7il/DANBgkqhkiG9w0BAQsFAAOCAgEArlp0WSTwHgv8wgI+XT/QNxUQBiVyrHql
+                SHIMCBA7rDPPsl2RURWzQDE7zqovA3r7fnrYMfVXAAdgzXhDLQwL15RdaeoZUsjH
+                xN4y5Mtn0zv1yp7PPtZUc0mZ4Q0xWo4MPve82IfhiqWXretUxvcZ4NKY3sni0s8W
+                hViZdHH77vVIWWcWK414cpRwvsDtaKkgS4h8yHiUOtlgKgTViyUd0ovphR0boLtF
+                Ddw+jmLGM9c5keIs87RCTqCcHD4nP81kHHUaE60NDMtHH5UONSA5ecsHo11tC1am
+                9U2TRs5+zwyBnwy4oOE/EZxXslcz27XyAX7MOhZppue+xtEDyex4gjiS27Nl8Va1
+                R1I1vkI5A209OQQ4JXzJZcAtgWep/ez0hu8TOkdtn0l/6aGkj2l3iwVG8edjiwSz
+                nVSPaBFKRtrHPuk9uEqu1xtP2klMeJEs7a5bVOyBOzZksafDwVTSPdRnDJDxo/Rx
+                bGzSWWYqKNsDxyV9aVMZ1iABW2O7qh6eXbioICzWAWQyplLeihnZ1d0o0h9gk/Kt
+                dPuLATo/WSXBA3oDfdEjjEWhmEdj6mR92KrOTQUF7JkOM74ZGs/lCxXsCOva7Z0N
+                kZmmpiU3Dewr11+SUxGx8g/4Ba1FhW9pXI9jSYguzY1KY210nF2P5YLsz/HgIM2r
+                SVA+QXhvcj0=
+                -----END CERTIFICATE-----
+                """),
+
+            // End certificate:
+            X509Certificate2.CreateFromPem($"""
+                -----BEGIN CERTIFICATE-----
+                MIIEfDCCAmSgAwIBAgIRAMrgbbME5gBGSu3XfBUTMZAwDQYJKoZIhvcNAQELBQAw
+                GjEYMBYGA1UEAxMPSW50ZXJtZWRpYXRlIENBMCAXDTI2MDEzMDE3Mzg1NVoYDzIx
+                MjYwMTMxMTczODU1WjAaMRgwFgYDVQQDEw9FbmQgY2VydGlmaWNhdGUwggEiMA0G
+                CSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDY5UyMDT2evGgOXTzuH6adZmLcjLbv
+                9u1cdpfYc2jgdA+jXm0hvQmhwmQMosu0KDFtMX0okZ4xM0H5XEDbxmKBY7WwAdFF
+                Morz7tu/UzRLYXUJp/SRk6/zXKb4qkvtWaEcKBujlLA7jUEDcrCmTaoyU0Zz9ZzG
+                zrJc59UceXSH3gAoAkoQesNKUBsdgdk8Na3h+U8nLl4rHXWkSYi/VwKkROaDfnT2
+                mgpsJfBVyQtuAJDXsLFRhtmsPnR3KoutJUh69WnlC7mRrTVI2rhUPKFny1gGxk1W
+                rsI9vzkIIiLkc+tsAR76DNnoVkXhuqEQ9SMnl5CxV2GFWEX/TOLhteVVAgMBAAGj
+                gbowgbcwDAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0lAQH/BAww
+                CgYIKwYBBQUHAwIwHQYDVR0OBBYEFCRF8sJJqhgyr/A8RnsP/JUE06dGMEoGA1Ud
+                IwRDMEGAFKu5rVZeAQici1kxxKUgqqJKG0wnoRakFDASMRAwDgYDVQQDEwdSb290
+                IENBghEAulMq8O3PqUY9qo1orxpQujAUBgNVHREEDTALgglsb2NhbGhvc3QwDQYJ
+                KoZIhvcNAQELBQADggIBACW7bCe7KpuAVZO4jIjtMLwKJ+1QZ7551FIsvBLDCFF+
+                fX2zND0ne+8hv1qemHdzDBED6WeurOQqGtgI+adj7HrXAfAXKihBaCjq2U6U3sR5
+                fqyYY5of1gvJhvJK+TEY3Fb55PvA+j38GwI52hKSkRdunPpCjRI1d/+Jvb+voUOa
+                kzLsARgOaMhJtYQeMebKr7uSLezFoOaRfc5rqpiVTA7xXO8dHkz2p49bxfIRj1Tq
+                2Lgx9uAE4omwzxSB/cwZiG1tNgpVVvn2Tb20SgCIBGl7Oqave+LRm1Eztl0Q8e8C
+                iz6bLMiCcesRRFxU8TE2mhmNOeNUsBIP730+ZOnP2rgX3Zs93gTFX/omPuQS8Kj3
+                ly5+v+PZkuN3xZ56mLXURlDRmWI1gqNRgNYl1jwYyQ0ll05yk3JFIyUvxdg3klRK
+                9/+MoKw8PVGbSKntzoHiqVUHnrB1lemJqZ91Dx+h8K58eaRs3/aL0lUEli7NpNXR
+                5Q6Tl7cCVe5ZjtR7Z56IQLmswq/TNJVXQSBjLLwLCkaJvTXWwojkG5ETU/t/ikCG
+                c2bH6ICUizzz2gdJNdcIP8wc7SsxONdpPmK3ED3KQBlTVDRUJ/w9Q4HYztXEFiyg
+                xkNzboe3SYq92mqVilBTiY51SNZuOr8zRZp9gcMKoQgmxgfl7j6JiRVpZzoxb54Y
+                -----END CERTIFICATE-----
+                """)
+        };
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() =>
+            builder.EnablePublicKeyInfrastructureTlsClientAuthentication(certificates));
+
+        Assert.Equal("certificates", exception.ParamName);
+    }
+
+    [Fact]
+    public void EnablePublicKeyInfrastructureTlsClientAuthentication_PolicyIsCorrectlyConfigured()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var certificates = new X509Certificate2Collection
+        {
+            // Root certificate:
+            X509Certificate2.CreateFromPem($"""
+                -----BEGIN CERTIFICATE-----
+                MIIE7jCCAtagAwIBAgIJAM1FBDwXuKX8MA0GCSqGSIb3DQEBCwUAMBIxEDAOBgNV
+                BAMTB1Jvb3QgQ0EwIBcNMjYwMTMwMTczODU1WhgPMjEyNjAxMzExNzM4NTVaMBIx
+                EDAOBgNVBAMTB1Jvb3QgQ0EwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoIC
+                AQDt/Nz3V5bKbYrJoITYrk3dL9CF+rDcMM6VyJ1pj33feXMTCcRJXkydKDc25sX+
+                2C/yrx75zxcUBRoWzsg++YdHJffcZI0+6Q7XBOndNKflCL8lBihvT/EUO9MQYRWV
+                495ie3deXoVGebrl6XbGAfm755Ml8KikYFryU6WOxApfQxjcKxnQLNLCTkIyn3WE
+                lzce9awtECPgdQfjDzCmE32xXMQcn/0HQUDxiyGvBQbBf8ZM9h3iJz4VGGVQkE7m
+                Ix15CwjAyrPc7jGAnUx00QGOCGzfT4bQaHOAZMgEJ8/KJhmx0Fmd6KR1fNJDqDvx
+                JYW683y1P512QZgN16e2ZEOdg9fsuXV/PaS6NmHOh7s/hwZsoIf3CJ5dX/M1h1BA
+                4buxlvRfeZdANQHJLuQFPC4DQ8SWgbxXhL8KCo0jS9rUPTaxikL7+prFK/t39YFt
+                LzowUL8d+sMvUrn3v9yXb363wBB7fja1ZG1EOl7r2YO1uGleRR1ztymfRVziQ/Np
+                wRjDeBb9rWL9srPPilvo+5VsJe2a/XtfZuxMoH6vNEl04W6/iyYE4cVizwRC8GTW
+                hSHdhk2vT2/eyGSK3Cj5U74x+orHD+3XS6xHd63qB1oo+hJl2Ln/7pBAm9qFnNed
+                u6Wn/++Oi7M7nMU/ngEkbPKUfwrR/fEKQuweJaXTgiqj3QIDAQABo0UwQzASBgNV
+                HRMBAf8ECDAGAQH/AgEBMA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUKv1o4gZN
+                ED0vspeWdqb0WeS3N04wDQYJKoZIhvcNAQELBQADggIBACLp5z1zaemqoFPtQ5Sr
+                Ii2ijs03Gc52Y/Pbg1V83xg1nMa+vI4aQYc90FZnNOv7I4VAmR6I3cI5bA3tnrzB
+                /yCMOkdxiFt6W0OQPMlmlVdCbPtUqXWM3tLilRn90XYEEWZB8I1sOrk2WH7oEHmu
+                W7BC2I3igjhUDug2bl7VwdBXzRJrWFgYdhVsjRU9rx3AbZqbD/3pC9B3PcwZxTGz
+                k8wRMP/9cF49VvUFVWhp01Bol1StwgX3r6IbaamDdIJd0MvHp0ctgqL6PLRzgRRY
+                adzWX8SPlgARVCixSOkXmAGNeuNWT/Ulo0W1xaNVTvOssfx58v3lwnjoaMLi7UFA
+                tCPrLZtZYvScB0+0AjUwfIfKrHqRdP5OqJZi7PhahR39tTh9pQX63INQvKYKO583
+                iidiNDau4HU+e+ujnXR5xJdgNWtuehKRdZFlLBH0lKKXrrnPyW9YtIjCVf1zhc+L
+                VSyo/aajWKBGqyTTbM1zetGe1rah97i7/0snoh97sWHlenmSX3BQUnajLkp9ZMh0
+                vY4koR1fxIlxHnOQ7SebZ23QiWUjdmJoOXW6Bub6VhWMDY96EpMr17QiGtexbUHD
+                1nm2Z0xGwyWeyg2QSnNEAIZ6F2EeaZ6jmD/5ASXujcutNGyPwsSGkog4/Ir5Ol15
+                +3OP4DTt75BHxzMUxB6XmbYN
+                -----END CERTIFICATE-----
+                """),
+
+            // Intermediate certificate:
+            X509Certificate2.CreateFromPem($"""
+                -----BEGIN CERTIFICATE-----
+                MIIFRDCCAyygAwIBAgIRALpTKvDtz6lGPaqNaK8aULowDQYJKoZIhvcNAQELBQAw
+                EjEQMA4GA1UEAxMHUm9vdCBDQTAgFw0yNjAxMzAxNzM4NTVaGA8yMTI2MDEzMTE3
+                Mzg1NVowGjEYMBYGA1UEAxMPSW50ZXJtZWRpYXRlIENBMIICIjANBgkqhkiG9w0B
+                AQEFAAOCAg8AMIICCgKCAgEAvHiS4aNz7vL5mOJNjbpybcK75RhH1sXifLwKW8Zg
+                nHm+KjdRENf3X9yp7c+xNrtpHhG4/gp8M++0G1Cz4Yvq8idZu8IpMiqk9/KT447b
+                VocaRPCFC4NIC9U6g4s3rwHLUr2wMCAWiM9yjWcbXcvIlnSuA/i/lSAfAUPjrn8X
+                LLDgqlEkInmWRvYvDmdmw7vdqfDobFTDh0YRWB/y/LuDvkPFBDg3cfY8+AyrDkha
+                y3m1Ot3NTsg0O/HOL6MXMN9HRd4vX37XBV88kZtFE+vyHdYDs2NzGjAbfz4JZ6xz
+                4+weUjklOc9ucAEgfAnwijH9w4KFBJEHAqtOMsbrIy74MvPTFj3LeayLo5nhLeqp
+                GbqvJcEX1UM83vFt+JUaDVbXDUG2ECHMDe6W5r5eYQtZW1ErKkRYNTJu++I0vDZr
+                EeZdYDYp15dbksMXUDyzhJ0WS0N23b7s57S6YAbok97UD/d+aGMtY3kJ/wIiftYY
+                Sel/MO/QXrgNchnVtUbShgE2oFvAJUYRvlZarG9/egp3Jb3B4WNjwIyzaT6SFtnG
+                Tg+IEXYPE2s5x4YZ8GINygWKrDbV7UuANRjKvoBlGmcrW/iz2Aaa+H5696p1HLVA
+                k7gXTw7WlJxzP6JPs2ZjWu27k88oAUV8HJjzFzGUsRPIjkf8KcJuxAqwLPoqFelh
+                uNECAwEAAaOBijCBhzASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIB
+                BjAdBgNVHQ4EFgQUq7mtVl4BCJyLWTHEpSCqokobTCcwQgYDVR0jBDswOYAUKv1o
+                4gZNED0vspeWdqb0WeS3N06hFqQUMBIxEDAOBgNVBAMTB1Jvb3QgQ0GCCQDNRQQ8
+                F7il/DANBgkqhkiG9w0BAQsFAAOCAgEArlp0WSTwHgv8wgI+XT/QNxUQBiVyrHql
+                SHIMCBA7rDPPsl2RURWzQDE7zqovA3r7fnrYMfVXAAdgzXhDLQwL15RdaeoZUsjH
+                xN4y5Mtn0zv1yp7PPtZUc0mZ4Q0xWo4MPve82IfhiqWXretUxvcZ4NKY3sni0s8W
+                hViZdHH77vVIWWcWK414cpRwvsDtaKkgS4h8yHiUOtlgKgTViyUd0ovphR0boLtF
+                Ddw+jmLGM9c5keIs87RCTqCcHD4nP81kHHUaE60NDMtHH5UONSA5ecsHo11tC1am
+                9U2TRs5+zwyBnwy4oOE/EZxXslcz27XyAX7MOhZppue+xtEDyex4gjiS27Nl8Va1
+                R1I1vkI5A209OQQ4JXzJZcAtgWep/ez0hu8TOkdtn0l/6aGkj2l3iwVG8edjiwSz
+                nVSPaBFKRtrHPuk9uEqu1xtP2klMeJEs7a5bVOyBOzZksafDwVTSPdRnDJDxo/Rx
+                bGzSWWYqKNsDxyV9aVMZ1iABW2O7qh6eXbioICzWAWQyplLeihnZ1d0o0h9gk/Kt
+                dPuLATo/WSXBA3oDfdEjjEWhmEdj6mR92KrOTQUF7JkOM74ZGs/lCxXsCOva7Z0N
+                kZmmpiU3Dewr11+SUxGx8g/4Ba1FhW9pXI9jSYguzY1KY210nF2P5YLsz/HgIM2r
+                SVA+QXhvcj0=
+                -----END CERTIFICATE-----
+                """)
+        };
+
+        // Act
+        builder.EnablePublicKeyInfrastructureTlsClientAuthentication(certificates);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.NotNull(options.PublicKeyInfrastructureTlsClientAuthenticationPolicy);
+        Assert.Equal(X509ChainTrustMode.CustomRootTrust, options.PublicKeyInfrastructureTlsClientAuthenticationPolicy.TrustMode);
+        Assert.Contains(options.PublicKeyInfrastructureTlsClientAuthenticationPolicy.ApplicationPolicy.Cast<Oid>(),
+            oid => string.Equals(oid.Value, ObjectIdentifiers.ExtendedKeyUsages.ClientAuthentication, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void EnablePublicKeyInfrastructureTlsClientAuthentication_ThrowsAnExceptionWhenTrustModeIsChanged()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+        var certificates = new X509Certificate2Collection
+        {
+            // Root certificate:
+            X509Certificate2.CreateFromPem($"""
+                -----BEGIN CERTIFICATE-----
+                MIIE7jCCAtagAwIBAgIJAM1FBDwXuKX8MA0GCSqGSIb3DQEBCwUAMBIxEDAOBgNV
+                BAMTB1Jvb3QgQ0EwIBcNMjYwMTMwMTczODU1WhgPMjEyNjAxMzExNzM4NTVaMBIx
+                EDAOBgNVBAMTB1Jvb3QgQ0EwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoIC
+                AQDt/Nz3V5bKbYrJoITYrk3dL9CF+rDcMM6VyJ1pj33feXMTCcRJXkydKDc25sX+
+                2C/yrx75zxcUBRoWzsg++YdHJffcZI0+6Q7XBOndNKflCL8lBihvT/EUO9MQYRWV
+                495ie3deXoVGebrl6XbGAfm755Ml8KikYFryU6WOxApfQxjcKxnQLNLCTkIyn3WE
+                lzce9awtECPgdQfjDzCmE32xXMQcn/0HQUDxiyGvBQbBf8ZM9h3iJz4VGGVQkE7m
+                Ix15CwjAyrPc7jGAnUx00QGOCGzfT4bQaHOAZMgEJ8/KJhmx0Fmd6KR1fNJDqDvx
+                JYW683y1P512QZgN16e2ZEOdg9fsuXV/PaS6NmHOh7s/hwZsoIf3CJ5dX/M1h1BA
+                4buxlvRfeZdANQHJLuQFPC4DQ8SWgbxXhL8KCo0jS9rUPTaxikL7+prFK/t39YFt
+                LzowUL8d+sMvUrn3v9yXb363wBB7fja1ZG1EOl7r2YO1uGleRR1ztymfRVziQ/Np
+                wRjDeBb9rWL9srPPilvo+5VsJe2a/XtfZuxMoH6vNEl04W6/iyYE4cVizwRC8GTW
+                hSHdhk2vT2/eyGSK3Cj5U74x+orHD+3XS6xHd63qB1oo+hJl2Ln/7pBAm9qFnNed
+                u6Wn/++Oi7M7nMU/ngEkbPKUfwrR/fEKQuweJaXTgiqj3QIDAQABo0UwQzASBgNV
+                HRMBAf8ECDAGAQH/AgEBMA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUKv1o4gZN
+                ED0vspeWdqb0WeS3N04wDQYJKoZIhvcNAQELBQADggIBACLp5z1zaemqoFPtQ5Sr
+                Ii2ijs03Gc52Y/Pbg1V83xg1nMa+vI4aQYc90FZnNOv7I4VAmR6I3cI5bA3tnrzB
+                /yCMOkdxiFt6W0OQPMlmlVdCbPtUqXWM3tLilRn90XYEEWZB8I1sOrk2WH7oEHmu
+                W7BC2I3igjhUDug2bl7VwdBXzRJrWFgYdhVsjRU9rx3AbZqbD/3pC9B3PcwZxTGz
+                k8wRMP/9cF49VvUFVWhp01Bol1StwgX3r6IbaamDdIJd0MvHp0ctgqL6PLRzgRRY
+                adzWX8SPlgARVCixSOkXmAGNeuNWT/Ulo0W1xaNVTvOssfx58v3lwnjoaMLi7UFA
+                tCPrLZtZYvScB0+0AjUwfIfKrHqRdP5OqJZi7PhahR39tTh9pQX63INQvKYKO583
+                iidiNDau4HU+e+ujnXR5xJdgNWtuehKRdZFlLBH0lKKXrrnPyW9YtIjCVf1zhc+L
+                VSyo/aajWKBGqyTTbM1zetGe1rah97i7/0snoh97sWHlenmSX3BQUnajLkp9ZMh0
+                vY4koR1fxIlxHnOQ7SebZ23QiWUjdmJoOXW6Bub6VhWMDY96EpMr17QiGtexbUHD
+                1nm2Z0xGwyWeyg2QSnNEAIZ6F2EeaZ6jmD/5ASXujcutNGyPwsSGkog4/Ir5Ol15
+                +3OP4DTt75BHxzMUxB6XmbYN
+                -----END CERTIFICATE-----
+                """),
+
+            // Intermediate certificate:
+            X509Certificate2.CreateFromPem($"""
+                -----BEGIN CERTIFICATE-----
+                MIIFRDCCAyygAwIBAgIRALpTKvDtz6lGPaqNaK8aULowDQYJKoZIhvcNAQELBQAw
+                EjEQMA4GA1UEAxMHUm9vdCBDQTAgFw0yNjAxMzAxNzM4NTVaGA8yMTI2MDEzMTE3
+                Mzg1NVowGjEYMBYGA1UEAxMPSW50ZXJtZWRpYXRlIENBMIICIjANBgkqhkiG9w0B
+                AQEFAAOCAg8AMIICCgKCAgEAvHiS4aNz7vL5mOJNjbpybcK75RhH1sXifLwKW8Zg
+                nHm+KjdRENf3X9yp7c+xNrtpHhG4/gp8M++0G1Cz4Yvq8idZu8IpMiqk9/KT447b
+                VocaRPCFC4NIC9U6g4s3rwHLUr2wMCAWiM9yjWcbXcvIlnSuA/i/lSAfAUPjrn8X
+                LLDgqlEkInmWRvYvDmdmw7vdqfDobFTDh0YRWB/y/LuDvkPFBDg3cfY8+AyrDkha
+                y3m1Ot3NTsg0O/HOL6MXMN9HRd4vX37XBV88kZtFE+vyHdYDs2NzGjAbfz4JZ6xz
+                4+weUjklOc9ucAEgfAnwijH9w4KFBJEHAqtOMsbrIy74MvPTFj3LeayLo5nhLeqp
+                GbqvJcEX1UM83vFt+JUaDVbXDUG2ECHMDe6W5r5eYQtZW1ErKkRYNTJu++I0vDZr
+                EeZdYDYp15dbksMXUDyzhJ0WS0N23b7s57S6YAbok97UD/d+aGMtY3kJ/wIiftYY
+                Sel/MO/QXrgNchnVtUbShgE2oFvAJUYRvlZarG9/egp3Jb3B4WNjwIyzaT6SFtnG
+                Tg+IEXYPE2s5x4YZ8GINygWKrDbV7UuANRjKvoBlGmcrW/iz2Aaa+H5696p1HLVA
+                k7gXTw7WlJxzP6JPs2ZjWu27k88oAUV8HJjzFzGUsRPIjkf8KcJuxAqwLPoqFelh
+                uNECAwEAAaOBijCBhzASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIB
+                BjAdBgNVHQ4EFgQUq7mtVl4BCJyLWTHEpSCqokobTCcwQgYDVR0jBDswOYAUKv1o
+                4gZNED0vspeWdqb0WeS3N06hFqQUMBIxEDAOBgNVBAMTB1Jvb3QgQ0GCCQDNRQQ8
+                F7il/DANBgkqhkiG9w0BAQsFAAOCAgEArlp0WSTwHgv8wgI+XT/QNxUQBiVyrHql
+                SHIMCBA7rDPPsl2RURWzQDE7zqovA3r7fnrYMfVXAAdgzXhDLQwL15RdaeoZUsjH
+                xN4y5Mtn0zv1yp7PPtZUc0mZ4Q0xWo4MPve82IfhiqWXretUxvcZ4NKY3sni0s8W
+                hViZdHH77vVIWWcWK414cpRwvsDtaKkgS4h8yHiUOtlgKgTViyUd0ovphR0boLtF
+                Ddw+jmLGM9c5keIs87RCTqCcHD4nP81kHHUaE60NDMtHH5UONSA5ecsHo11tC1am
+                9U2TRs5+zwyBnwy4oOE/EZxXslcz27XyAX7MOhZppue+xtEDyex4gjiS27Nl8Va1
+                R1I1vkI5A209OQQ4JXzJZcAtgWep/ez0hu8TOkdtn0l/6aGkj2l3iwVG8edjiwSz
+                nVSPaBFKRtrHPuk9uEqu1xtP2klMeJEs7a5bVOyBOzZksafDwVTSPdRnDJDxo/Rx
+                bGzSWWYqKNsDxyV9aVMZ1iABW2O7qh6eXbioICzWAWQyplLeihnZ1d0o0h9gk/Kt
+                dPuLATo/WSXBA3oDfdEjjEWhmEdj6mR92KrOTQUF7JkOM74ZGs/lCxXsCOva7Z0N
+                kZmmpiU3Dewr11+SUxGx8g/4Ba1FhW9pXI9jSYguzY1KY210nF2P5YLsz/HgIM2r
+                SVA+QXhvcj0=
+                -----END CERTIFICATE-----
+                """)
+        };
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.EnablePublicKeyInfrastructureTlsClientAuthentication(certificates,
+                policy => policy.TrustMode = X509ChainTrustMode.System));
+
+        Assert.Equal(SR.GetResourceString(SR.ID0509), exception.Message);
+    }
+#endif
+
+    [Fact]
+    public void EnableSelfSignedTlsClientAuthentication_ThrowsAnExceptionForNullConfiguration()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() =>
+            builder.EnableSelfSignedTlsClientAuthentication(configuration: null!));
+
+        Assert.Equal("configuration", exception.ParamName);
+    }
+
+#if NET
+    [Fact]
+    public void EnableSelfSignedTlsClientAuthentication_PolicyIsCorrectlyConfigured()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.EnableSelfSignedTlsClientAuthentication();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.NotNull(options.SelfSignedTlsClientAuthenticationPolicy);
+        Assert.Equal(X509ChainTrustMode.CustomRootTrust, options.SelfSignedTlsClientAuthenticationPolicy.TrustMode);
+        Assert.Equal(X509RevocationMode.NoCheck, options.SelfSignedTlsClientAuthenticationPolicy.RevocationMode);
+        Assert.Contains(options.SelfSignedTlsClientAuthenticationPolicy.ApplicationPolicy.Cast<Oid>(),
+            oid => string.Equals(oid.Value, ObjectIdentifiers.ExtendedKeyUsages.ClientAuthentication, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void EnableSelfSignedTlsClientAuthentication_ThrowsAnExceptionWhenTrustModeIsChanged()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.EnableSelfSignedTlsClientAuthentication(
+                policy => policy.TrustMode = X509ChainTrustMode.System));
+
+        Assert.Equal(SR.GetResourceString(SR.ID0509), exception.Message);
+    }
+#endif
+
+    [Fact]
+    public void IgnoreAudiencePermissions_AudiencePermissionsAreIgnored()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.IgnoreAudiencePermissions();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.IgnoreAudiencePermissions);
+    }
+
+    [Fact]
+    public void IgnoreGrantTypePermissions_GrantTypePermissionsAreIgnored()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.IgnoreGrantTypePermissions();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.IgnoreGrantTypePermissions);
+    }
+
+    [Fact]
+    public void IgnoreScopePermissions_ScopePermissionsAreIgnored()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.IgnoreScopePermissions();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.IgnoreScopePermissions);
+    }
+
+    [Fact]
+    public void IgnoreResourcePermissions_ResourcePermissionsAreIgnored()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.IgnoreResourcePermissions();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.IgnoreResourcePermissions);
+    }
+
+    [Fact]
+    public void IgnoreResponseTypePermissions_ResponseTypePermissionsAreIgnored()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.IgnoreResponseTypePermissions();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.IgnoreResponseTypePermissions);
+    }
+
+    [Fact]
     public void RequireProofKeyForCodeExchange_PkceIsEnforced()
     {
         // Arrange
@@ -753,27 +1855,27 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
-    public void SetAuthorizationEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetAuthorizationEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetAuthorizationEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetAuthorizationEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetAuthorizationEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetAuthorizationEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetAuthorizationEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetAuthorizationEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
@@ -786,8 +1888,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetAuthorizationEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -800,8 +1902,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetAuthorizationEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -837,27 +1939,27 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
-    public void SetConfigurationEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetConfigurationEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetConfigurationEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetConfigurationEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetConfigurationEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetConfigurationEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetConfigurationEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetConfigurationEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
@@ -870,8 +1972,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetConfigurationEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -884,8 +1986,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetConfigurationEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -921,195 +2023,649 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
-    public void SetCryptographyEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetJsonWebKeySetEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetCryptographyEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetJsonWebKeySetEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetCryptographyEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetJsonWebKeySetEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetCryptographyEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetJsonWebKeySetEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
     [InlineData(@"C:\")]
-    public void SetCryptographyEndpointUris_ThrowsExceptionForMalformedUri(string uri)
+    public void SetJsonWebKeySetEndpointUris_ThrowsExceptionForMalformedUri(string uri)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetCryptographyEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetJsonWebKeySetEndpointUris(new Uri(uri)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("~/path")]
-    public void SetCryptographyEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
+    public void SetJsonWebKeySetEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetCryptographyEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetJsonWebKeySetEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SetCryptographyEndpointUris_ClearsUris()
+    public void SetJsonWebKeySetEndpointUris_ClearsUris()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetCryptographyEndpointUris(Array.Empty<Uri>());
+        builder.SetJsonWebKeySetEndpointUris(Array.Empty<Uri>());
 
         var options = GetOptions(services);
 
         // Assert
-        Assert.Empty(options.CryptographyEndpointUris);
+        Assert.Empty(options.JsonWebKeySetEndpointUris);
     }
 
     [Fact]
-    public void SetCryptographyEndpointUris_AddsUri()
+    public void SetJsonWebKeySetEndpointUris_AddsUri()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetCryptographyEndpointUris("http://localhost/endpoint-path");
+        builder.SetJsonWebKeySetEndpointUris("http://localhost/endpoint-path");
 
         var options = GetOptions(services);
 
         // Assert
-        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.CryptographyEndpointUris);
+        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.JsonWebKeySetEndpointUris);
     }
 
     [Fact]
-    public void SetDeviceEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetDeviceAuthorizationEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetDeviceEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetDeviceAuthorizationEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetDeviceEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetDeviceAuthorizationEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetDeviceEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetDeviceAuthorizationEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
     [InlineData(@"C:\")]
-    public void SetDeviceEndpointUris_ThrowsExceptionForMalformedUri(string uri)
+    public void SetDeviceAuthorizationEndpointUris_ThrowsExceptionForMalformedUri(string uri)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetDeviceEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetDeviceAuthorizationEndpointUris(new Uri(uri)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("~/path")]
-    public void SetDeviceEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
+    public void SetDeviceAuthorizationEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetDeviceEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetDeviceAuthorizationEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SetDeviceEndpointUris_ClearsUris()
+    public void SetDeviceAuthorizationEndpointUris_ClearsUris()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetDeviceEndpointUris(Array.Empty<Uri>());
+        builder.SetDeviceAuthorizationEndpointUris(Array.Empty<Uri>());
 
         var options = GetOptions(services);
 
         // Assert
-        Assert.Empty(options.DeviceEndpointUris);
+        Assert.Empty(options.DeviceAuthorizationEndpointUris);
     }
 
     [Fact]
-    public void SetDeviceEndpointUris_AddsUri()
+    public void SetDeviceAuthorizationEndpointUris_AddsUri()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetDeviceEndpointUris("http://localhost/endpoint-path");
+        builder.SetDeviceAuthorizationEndpointUris("http://localhost/endpoint-path");
 
         var options = GetOptions(services);
 
         // Assert
-        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.DeviceEndpointUris);
+        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.DeviceAuthorizationEndpointUris);
     }
 
     [Fact]
-    public void SetIntrospectionEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetEndSessionEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetIntrospectionEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetEndSessionEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetIntrospectionEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetEndSessionEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetIntrospectionEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetEndSessionEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(@"C:\")]
+    public void SetEndSessionEndpointUris_ThrowsExceptionForMalformedUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetEndSessionEndpointUris(new Uri(uri)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("~/path")]
+    public void SetEndSessionEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetEndSessionEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SetEndSessionEndpointUris_ClearsUris()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetEndSessionEndpointUris(Array.Empty<Uri>());
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Empty(options.EndSessionEndpointUris);
+    }
+
+    [Fact]
+    public void SetEndSessionEndpointUris_AddsUri()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetEndSessionEndpointUris("http://localhost/endpoint-path");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.EndSessionEndpointUris);
+    }
+
+    [Fact]
+    public void SetMtlsDeviceAuthorizationEndpointAliasUri_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsDeviceAuthorizationEndpointAliasUri(uri: (null as Uri)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetMtlsDeviceAuthorizationEndpointAliasUri_String_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsDeviceAuthorizationEndpointAliasUri(uri: (null as string)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(@"C:\")]
+    public void SetMtlsDeviceAuthorizationEndpointAliasUri_ThrowsExceptionForMalformedUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsDeviceAuthorizationEndpointAliasUri(new Uri(uri)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("~/path")]
+    public void SetMtlsDeviceAuthorizationEndpointAliasUri_ThrowsExceptionForInvalidRelativeUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsDeviceAuthorizationEndpointAliasUri(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SetMtlsDeviceAuthorizationEndpointAliasUri_AddsUri()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetMtlsDeviceAuthorizationEndpointAliasUri("http://localhost/endpoint-path");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(new Uri("http://localhost/endpoint-path"), options.MtlsDeviceAuthorizationEndpointAliasUri);
+    }
+
+    [Fact]
+    public void SetMtlsIntrospectionEndpointAliasUri_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsIntrospectionEndpointAliasUri(uri: (null as Uri)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetMtlsIntrospectionEndpointAliasUri_String_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsIntrospectionEndpointAliasUri(uri: (null as string)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(@"C:\")]
+    public void SetMtlsIntrospectionEndpointAliasUri_ThrowsExceptionForMalformedUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsIntrospectionEndpointAliasUri(new Uri(uri)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("~/path")]
+    public void SetMtlsIntrospectionEndpointAliasUri_ThrowsExceptionForInvalidRelativeUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsIntrospectionEndpointAliasUri(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SetMtlsIntrospectionEndpointAliasUri_AddsUri()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetMtlsIntrospectionEndpointAliasUri("http://localhost/endpoint-path");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(new Uri("http://localhost/endpoint-path"), options.MtlsIntrospectionEndpointAliasUri);
+    }
+
+    [Fact]
+    public void SetMtlsPushedAuthorizationEndpointAliasUri_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsPushedAuthorizationEndpointAliasUri(uri: (null as Uri)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetMtlsPushedAuthorizationEndpointAliasUri_String_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsPushedAuthorizationEndpointAliasUri(uri: (null as string)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(@"C:\")]
+    public void SetMtlsPushedAuthorizationEndpointAliasUri_ThrowsExceptionForMalformedUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsPushedAuthorizationEndpointAliasUri(new Uri(uri)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("~/path")]
+    public void SetMtlsPushedAuthorizationEndpointAliasUri_ThrowsExceptionForInvalidRelativeUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsPushedAuthorizationEndpointAliasUri(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SetMtlsPushedAuthorizationEndpointAliasUri_AddsUri()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetMtlsPushedAuthorizationEndpointAliasUri("http://localhost/endpoint-path");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(new Uri("http://localhost/endpoint-path"), options.MtlsPushedAuthorizationEndpointAliasUri);
+    }
+
+    [Fact]
+    public void SetMtlsRevocationEndpointAliasUri_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsRevocationEndpointAliasUri(uri: (null as Uri)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetMtlsRevocationEndpointAliasUri_String_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsRevocationEndpointAliasUri(uri: (null as string)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(@"C:\")]
+    public void SetMtlsRevocationEndpointAliasUri_ThrowsExceptionForMalformedUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsRevocationEndpointAliasUri(new Uri(uri)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("~/path")]
+    public void SetMtlsRevocationEndpointAliasUri_ThrowsExceptionForInvalidRelativeUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsRevocationEndpointAliasUri(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SetMtlsRevocationEndpointAliasUri_AddsUri()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetMtlsRevocationEndpointAliasUri("http://localhost/endpoint-path");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(new Uri("http://localhost/endpoint-path"), options.MtlsRevocationEndpointAliasUri);
+    }
+
+    [Fact]
+    public void SetMtlsTokenEndpointAliasUri_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsTokenEndpointAliasUri(uri: (null as Uri)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetMtlsTokenEndpointAliasUri_String_ThrowsExceptionWhenUriIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetMtlsTokenEndpointAliasUri(uri: (null as string)!));
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(@"C:\")]
+    public void SetMtlsTokenEndpointAliasUri_ThrowsExceptionForMalformedUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsTokenEndpointAliasUri(new Uri(uri)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("~/path")]
+    public void SetMtlsTokenEndpointAliasUri_ThrowsExceptionForInvalidRelativeUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsTokenEndpointAliasUri(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SetMtlsTokenEndpointAliasUri_AddsUri()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetMtlsTokenEndpointAliasUri("http://localhost/endpoint-path");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(new Uri("http://localhost/endpoint-path"), options.MtlsTokenEndpointAliasUri);
+    }
+
+    [Theory]
+    [InlineData("~/path")]
+    public void SetMtlsUserInfoEndpointAliasUri_ThrowsExceptionForInvalidRelativeUri(string uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetMtlsUserInfoEndpointAliasUri(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uri", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SetMtlsUserInfoEndpointAliasUri_AddsUri()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetMtlsUserInfoEndpointAliasUri("http://localhost/endpoint-path");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(new Uri("http://localhost/endpoint-path"), options.MtlsUserInfoEndpointAliasUri);
+    }
+
+    [Fact]
+    public void SetIntrospectionEndpointUris_ThrowsExceptionWhenUrisIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetIntrospectionEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetIntrospectionEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetIntrospectionEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
@@ -1122,8 +2678,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetIntrospectionEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1136,8 +2692,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetIntrospectionEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1173,111 +2729,27 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
-    public void SetLogoutEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetRevocationEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetLogoutEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetRevocationEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetLogoutEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetRevocationEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetLogoutEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
-    }
-
-    [Theory]
-    [InlineData(@"C:\")]
-    public void SetLogoutEndpointUris_ThrowsExceptionForMalformedUri(string uri)
-    {
-        // Arrange
-        var services = CreateServices();
-        var builder = CreateBuilder(services);
-
-        // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetLogoutEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
-    }
-
-    [Theory]
-    [InlineData("~/path")]
-    public void SetLogoutEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
-    {
-        // Arrange
-        var services = CreateServices();
-        var builder = CreateBuilder(services);
-
-        // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetLogoutEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
-    }
-
-    [Fact]
-    public void SetLogoutEndpointUris_ClearsUris()
-    {
-        // Arrange
-        var services = CreateServices();
-        var builder = CreateBuilder(services);
-
-        // Act
-        builder.SetLogoutEndpointUris(Array.Empty<Uri>());
-
-        var options = GetOptions(services);
-
-        // Assert
-        Assert.Empty(options.LogoutEndpointUris);
-    }
-
-    [Fact]
-    public void SetLogoutEndpointUris_AddsUri()
-    {
-        // Arrange
-        var services = CreateServices();
-        var builder = CreateBuilder(services);
-
-        // Act
-        builder.SetLogoutEndpointUris("http://localhost/endpoint-path");
-
-        var options = GetOptions(services);
-
-        // Assert
-        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.LogoutEndpointUris);
-    }
-
-    [Fact]
-    public void SetRevocationEndpointUris_ThrowsExceptionWhenAddressesIsNull()
-    {
-        // Arrange
-        var services = CreateServices();
-        var builder = CreateBuilder(services);
-
-        // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetRevocationEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
-    }
-
-    [Fact]
-    public void SetRevocationEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
-    {
-        // Arrange
-        var services = CreateServices();
-        var builder = CreateBuilder(services);
-
-        // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetRevocationEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetRevocationEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
@@ -1290,8 +2762,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetRevocationEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1304,8 +2776,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetRevocationEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1341,27 +2813,27 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
-    public void SetTokenEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetTokenEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetTokenEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetTokenEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetTokenEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetTokenEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetTokenEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetTokenEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
@@ -1374,8 +2846,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetTokenEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1388,8 +2860,8 @@ public class OpenIddictServerBuilderTests
 
         // Act and assert
         var exception = Assert.Throws<ArgumentException>(() => builder.SetTokenEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1425,171 +2897,171 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
-    public void SetUserinfoEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetUserInfoEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetUserinfoEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetUserInfoEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetUserinfoEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetUserInfoEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetUserinfoEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetUserInfoEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
     [InlineData(@"C:\")]
-    public void SetUserinfoEndpointUris_ThrowsExceptionForMalformedUri(string uri)
+    public void SetUserInfoEndpointUris_ThrowsExceptionForMalformedUri(string uri)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetUserinfoEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetUserInfoEndpointUris(new Uri(uri)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("~/path")]
-    public void SetUserinfoEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
+    public void SetUserInfoEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetUserinfoEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetUserInfoEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SetUserinfoEndpointUris_ClearsUris()
+    public void SetUserInfoEndpointUris_ClearsUris()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetUserinfoEndpointUris(Array.Empty<Uri>());
+        builder.SetUserInfoEndpointUris(Array.Empty<Uri>());
 
         var options = GetOptions(services);
 
         // Assert
-        Assert.Empty(options.UserinfoEndpointUris);
+        Assert.Empty(options.UserInfoEndpointUris);
     }
 
     [Fact]
-    public void SetUserinfoEndpointUris_AddsUri()
+    public void SetUserInfoEndpointUris_AddsUri()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetUserinfoEndpointUris("http://localhost/endpoint-path");
+        builder.SetUserInfoEndpointUris("http://localhost/endpoint-path");
 
         var options = GetOptions(services);
 
         // Assert
-        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.UserinfoEndpointUris);
+        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.UserInfoEndpointUris);
     }
 
     [Fact]
-    public void SetVerificationEndpointUris_ThrowsExceptionWhenAddressesIsNull()
+    public void SetEndUserVerificationEndpointUris_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetVerificationEndpointUris(addresses: (null as Uri[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetEndUserVerificationEndpointUris(uris: (null as Uri[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Fact]
-    public void SetVerificationEndpointUris_Strings_ThrowsExceptionWhenAddressesIsNull()
+    public void SetEndUserVerificationEndpointUris_Strings_ThrowsExceptionWhenUrisIsNull()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetVerificationEndpointUris(addresses: (null as string[])!));
-        Assert.Equal("addresses", exception.ParamName);
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetEndUserVerificationEndpointUris(uris: (null as string[])!));
+        Assert.Equal("uris", exception.ParamName);
     }
 
     [Theory]
     [InlineData(@"C:\")]
-    public void SetVerificationEndpointUris_ThrowsExceptionForMalformedUri(string uri)
+    public void SetEndUserVerificationEndpointUris_ThrowsExceptionForMalformedUri(string uri)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetVerificationEndpointUris(new Uri(uri)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetEndUserVerificationEndpointUris(new Uri(uri)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.GetResourceString(SR.ID0072), exception.Message, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData("~/path")]
-    public void SetVerificationEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
+    public void SetEndUserVerificationEndpointUris_ThrowsExceptionForInvalidRelativeUri(string uri)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.SetVerificationEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
-        Assert.Equal("addresses", exception.ParamName);
-        Assert.Contains(SR.FormatID0081("~"), exception.Message);
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetEndUserVerificationEndpointUris(new Uri(uri, UriKind.RelativeOrAbsolute)));
+        Assert.Equal("uris", exception.ParamName);
+        Assert.Contains(SR.FormatID0081("~"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SetVerificationEndpointUris_ClearsUris()
+    public void SetEndUserVerificationEndpointUris_ClearsUris()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetVerificationEndpointUris(Array.Empty<Uri>());
+        builder.SetEndUserVerificationEndpointUris(Array.Empty<Uri>());
 
         var options = GetOptions(services);
 
         // Assert
-        Assert.Empty(options.VerificationEndpointUris);
+        Assert.Empty(options.EndUserVerificationEndpointUris);
     }
 
     [Fact]
-    public void SetVerificationEndpointUris_AddsUri()
+    public void SetEndUserVerificationEndpointUris_AddsUri()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetVerificationEndpointUris("http://localhost/endpoint-path");
+        builder.SetEndUserVerificationEndpointUris("http://localhost/endpoint-path");
 
         var options = GetOptions(services);
 
         // Assert
-        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.VerificationEndpointUris);
+        Assert.Contains(new Uri("http://localhost/endpoint-path"), options.EndUserVerificationEndpointUris);
     }
 
     [Fact]
@@ -1705,6 +3177,38 @@ public class OpenIddictServerBuilderTests
     }
 
     [Fact]
+    public void SetIssuedTokenLifetime_DefaultIssuedTokenLifetimeIsReplaced()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetIssuedTokenLifetime(TimeSpan.FromMinutes(42));
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(TimeSpan.FromMinutes(42), options.IssuedTokenLifetime);
+    }
+
+    [Fact]
+    public void SetIssuedTokenLifetime_IssuedTokenLifetimeCanBeSetToNull()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetIssuedTokenLifetime(null);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Null(options.IssuedTokenLifetime);
+    }
+
+    [Fact]
     public void SetDeviceCodeLifetimeLifetime_DefaultDeviceCodeLifetimeIsReplaced()
     {
         // Arrange
@@ -1734,6 +3238,145 @@ public class OpenIddictServerBuilderTests
 
         // Assert
         Assert.Null(options.DeviceCodeLifetime);
+    }
+
+    [Fact]
+    public void SetUserCodeCharset_ThrowsAnExceptionForNullCharset()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetUserCodeCharset(charset: null!));
+
+        Assert.Equal("charset", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetUserCodeCharset_ThrowsAnExceptionForCharsetWithTooFewCharacters()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => builder.SetUserCodeCharset(["0"]));
+
+        Assert.Equal("charset", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetUserCodeCharset_ThrowsAnExceptionForCharsetWithDuplicatedCharacters()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetUserCodeCharset(
+            ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "9"]));
+
+        Assert.StartsWith(SR.GetResourceString(SR.ID0436), exception.Message, StringComparison.Ordinal);
+        Assert.Equal("charset", exception.ParamName);
+    }
+
+#if NET
+    [InlineData("")]
+    [InlineData("\uD83D\uDE42\uD83D\uDE42")]
+    [Theory]
+    public void SetUserCodeCharset_ThrowsAnExceptionForCharsetWithInvalidCharacter(string character)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetUserCodeCharset(
+            ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", character]));
+
+        Assert.StartsWith(SR.GetResourceString(SR.ID0437), exception.Message, StringComparison.Ordinal);
+        Assert.Equal("charset", exception.ParamName);
+    }
+#else
+    [Fact]
+    public void SetUserCodeCharset_ThrowsAnExceptionForCharsetWithNonAsciiCharacter()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.SetUserCodeCharset(
+            ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "\uD83D\uDE42"]));
+
+        Assert.StartsWith(SR.GetResourceString(SR.ID0438), exception.Message, StringComparison.Ordinal);
+        Assert.Equal("charset", exception.ParamName);
+    }
+#endif
+
+    [Fact]
+    public void SetUserCodeCharset_ReplacesCharset()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetUserCodeCharset(["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"], options.UserCodeCharset);
+    }
+
+    [Fact]
+    public void SetUserCodeDisplayFormat_ReplacesDisplayFormat()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetUserCodeDisplayFormat("{0}{1}-{2}{3}-{4}{5}-{6}{7}-{8}{9}-{10}{11}");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal("{0}{1}-{2}{3}-{4}{5}-{6}{7}-{8}{9}-{10}{11}", options.UserCodeDisplayFormat);
+    }
+
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(5)]
+    [Theory]
+    public void SetUserCodeLength_ThrowsAnExceptionForInvalidLength(int length)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => builder.SetUserCodeLength(length));
+
+        Assert.Equal("length", exception.ParamName);
+    }
+
+    [Fact]
+    public void SetUserCodeLength_ReplacesLength()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.SetUserCodeLength(42);
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Equal(42, options.UserCodeLength);
     }
 
     [Fact]
@@ -1808,25 +3451,85 @@ public class OpenIddictServerBuilderTests
         var builder = CreateBuilder(services);
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetIssuer(null!));
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.SetIssuer((Uri?) null!));
 
-        Assert.Equal("address", exception.ParamName);
+        Assert.Equal("uri", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void SetIssuer_ThrowsAnExceptionForNullOrEmptyIssuer(string? uri)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.ThrowsAny<ArgumentException>(() => builder.SetIssuer(uri!));
+
+        Assert.Equal("uri", exception.ParamName);
     }
 
     [Fact]
-    public void SetIssuer_AddressIsReplaced()
+    public void SetIssuer_IssuerIsReplaced()
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
 
         // Act
-        builder.SetIssuer(new Uri("http://www.fabrikam.com/"));
+        builder.SetIssuer("http://www.fabrikam.com/");
 
         var options = GetOptions(services);
 
         // Assert
         Assert.Equal(new Uri("http://www.fabrikam.com/"), options.Issuer);
+    }
+
+    [Fact]
+    public void RegisterAudiences_AudiencesAreAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.RegisterAudiences("custom_audience_1", "custom_audience_2");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Contains("custom_audience_1", options.Audiences);
+        Assert.Contains("custom_audience_2", options.Audiences);
+    }
+
+    [Fact]
+    public void RegisterAudiences_ThrowsAnExceptionForNullAudiences()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.RegisterAudiences(audiences: null!));
+        Assert.Equal("audiences", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void RegisterAudiences_ThrowsAnExceptionForNullOrEmptyAudience(string? audience)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.RegisterAudiences([audience!]));
+
+        Assert.Equal("audiences", exception.ParamName);
+        Assert.Contains(SR.FormatID0457("audiences"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1861,18 +3564,108 @@ public class OpenIddictServerBuilderTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public void RegisterClaims_ThrowsAnExceptionForClaim(string claim)
+    public void RegisterClaims_ThrowsAnExceptionForNullOrEmptyClaim(string? claim)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
-        string[] claims = { claim };
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.RegisterClaims(claims));
+        var exception = Assert.Throws<ArgumentException>(() => builder.RegisterClaims([claim!]));
 
         Assert.Equal("claims", exception.ParamName);
-        Assert.Contains("Claims cannot be null or empty.", exception.Message);
+        Assert.Contains(SR.FormatID0457("claims"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RegisterPromptValues_PromptValuesAreAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.RegisterPromptValues("custom_value_1", "custom_value_2");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Contains("custom_value_1", options.PromptValues);
+        Assert.Contains("custom_value_2", options.PromptValues);
+    }
+
+    [Fact]
+    public void RegisterPromptValues_ThrowsAnExceptionForNullPromptValues()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.RegisterPromptValues(values: null!));
+        Assert.Equal("values", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void RegisterPromptValues_ThrowsAnExceptionForNullOrEmptyValue(string? value)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.RegisterPromptValues([value!]));
+
+        Assert.Equal("values", exception.ParamName);
+        Assert.Contains(SR.FormatID0457("values"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RegisterResources_ResourcesAreAdded()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.RegisterResources("urn:custom_resource_1", "urn:custom_resource_2");
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.Contains(new Uri("urn:custom_resource_1", UriKind.Absolute), options.Resources);
+        Assert.Contains(new Uri("urn:custom_resource_2", UriKind.Absolute), options.Resources);
+    }
+
+    [Fact]
+    public void RegisterResources_ThrowsAnExceptionForNullResources()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentNullException>(() => builder.RegisterResources((Uri[]) null!));
+        Assert.Equal("resources", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData("C:\\tmp\\file.xml")]
+    [InlineData("http://www.fabrikam.com/path#param=value")]
+    [InlineData("urn:fabrikam#param")]
+    public void RegisterResources_ThrowsAnExceptionForInvalidResources(string? resource)
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act and assert
+        var exception = Assert.Throws<ArgumentException>(() => builder.RegisterResources([resource!]));
+
+        Assert.Equal("resources", exception.ParamName);
+        Assert.Contains(SR.FormatID0495("resources"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1907,18 +3700,17 @@ public class OpenIddictServerBuilderTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    public void RegisterScopes_ThrowsAnExceptionForScope(string scope)
+    public void RegisterScopes_ThrowsAnExceptionForNullOrEmptyScope(string? scope)
     {
         // Arrange
         var services = CreateServices();
         var builder = CreateBuilder(services);
-        string[] scopes = { scope };
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentException>(() => builder.RegisterScopes(scopes));
+        var exception = Assert.Throws<ArgumentException>(() => builder.RegisterScopes([scope!]));
 
         Assert.Equal("scopes", exception.ParamName);
-        Assert.Contains("Scopes cannot be null or empty.", exception.Message);
+        Assert.Contains(SR.FormatID0457("scopes"), exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1953,13 +3745,74 @@ public class OpenIddictServerBuilderTests
         Assert.True(options.UseReferenceRefreshTokens);
     }
 
+    [Fact]
+    public void UseClientCertificateBoundAccessTokens_CertificateBoundTokensAreEnabled()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.UseClientCertificateBoundAccessTokens();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.UseClientCertificateBoundAccessTokens);
+    }
+
+    [Fact]
+    public void UseClientCertificateBoundRefreshTokens_CertificateBoundTokensAreEnabled()
+    {
+        // Arrange
+        var services = CreateServices();
+        var builder = CreateBuilder(services);
+
+        // Act
+        builder.UseClientCertificateBoundRefreshTokens();
+
+        var options = GetOptions(services);
+
+        // Assert
+        Assert.True(options.UseClientCertificateBoundRefreshTokens);
+    }
+
+    private static X509Certificate2 CreateCertificate(X509KeyUsageFlags usages, bool includePrivateKey)
+    {
+        using var algorithm = RSA.Create(keySizeInBits: 2048);
+
+        var request = new CertificateRequest(
+            subjectName: "CN=OpenIddict Server Tests",
+            key: algorithm,
+            hashAlgorithm: HashAlgorithmName.SHA256,
+            padding: RSASignaturePadding.Pkcs1);
+
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(usages, critical: true));
+
+        var certificate = request.CreateSelfSigned(
+            notBefore: DateTimeOffset.UtcNow.AddDays(-1),
+            notAfter: DateTimeOffset.UtcNow.AddDays(1));
+
+        if (includePrivateKey)
+        {
+            return certificate;
+        }
+
+        return X509CertificateLoader.LoadCertificate(certificate.Export(X509ContentType.Cert));
+    }
+
+    private static X509Certificate2 CreateEncryptionCertificate(bool includePrivateKey)
+        => CreateCertificate(X509KeyUsageFlags.KeyEncipherment, includePrivateKey);
+
+    private static X509Certificate2 CreateSigningCertificate(bool includePrivateKey)
+        => CreateCertificate(X509KeyUsageFlags.DigitalSignature, includePrivateKey);
+
     private static IServiceCollection CreateServices()
     {
         return new ServiceCollection().AddOptions();
     }
 
-    private static OpenIddictServerBuilder CreateBuilder(IServiceCollection services)
-        => new OpenIddictServerBuilder(services);
+    private static OpenIddictServerBuilder CreateBuilder(IServiceCollection services) => new(services);
 
     private static OpenIddictServerOptions GetOptions(IServiceCollection services)
     {
@@ -1970,7 +3823,7 @@ public class OpenIddictServerBuilderTests
         return options.Value;
     }
 
-    private class CustomContext : BaseContext
+    private sealed class CustomContext : BaseContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="BaseContext"/> class.
@@ -1978,8 +3831,8 @@ public class OpenIddictServerBuilderTests
         public CustomContext(OpenIddictServerTransaction transaction) : base(transaction) { }
     }
 
-    private class CustomHandler : IOpenIddictServerHandler<CustomContext>
+    private sealed class CustomHandler : IOpenIddictServerHandler<CustomContext>
     {
-        public ValueTask HandleAsync(CustomContext context) => default;
+        public ValueTask HandleAsync(CustomContext context) => ValueTask.CompletedTask;
     }
 }

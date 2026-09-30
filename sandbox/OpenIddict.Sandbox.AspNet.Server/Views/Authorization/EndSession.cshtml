@@ -1,0 +1,25 @@
+﻿@using Microsoft.Extensions.Primitives
+
+<div class="jumbotron">
+    <h1>Log out</h1>
+    <p class="lead text-left">Are you sure you want to sign out?</p>
+
+    @using (Html.BeginForm())
+    {
+        @Html.AntiForgeryToken()
+
+        @* Flow the request parameters so they can be received by the EndSessionPost action: *@
+        foreach (var parameter in string.Equals(Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase) ?
+            from name in Request.Form.AllKeys
+            from value in Request.Form.GetValues(name)
+            select new KeyValuePair<string, string>(name, value) :
+            from name in Request.QueryString.AllKeys
+            from value in Request.QueryString.GetValues(name)
+            select new KeyValuePair<string, string>(name, value))
+        {
+            <input type="hidden" name="@parameter.Key" value="@parameter.Value" />
+        }
+
+        <input class="btn btn-lg btn-success" name="Confirm" type="submit" value="Yes" />
+    }
+</div>

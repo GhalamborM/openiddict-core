@@ -4,9 +4,11 @@
  * the license and the contributors participating to this project.
  */
 
-using System.Diagnostics.CodeAnalysis;
+using System.Collections.Immutable;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -18,8 +20,8 @@ using Microsoft.Extensions.Logging;
 using OpenIddict.Server.IntegrationTests;
 using Xunit;
 using Xunit.Abstractions;
-using static OpenIddict.Server.AspNetCore.OpenIddictServerAspNetCoreHandlers;
 using static OpenIddict.Server.OpenIddictServerEvents;
+using static OpenIddict.Server.OpenIddictServerHandlers;
 using static OpenIddict.Server.OpenIddictServerHandlers.Protection;
 
 namespace OpenIddict.Server.AspNetCore.IntegrationTests;
@@ -32,20 +34,100 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
     }
 
     [Fact]
+    public async Task ProcessRequest_IgnoresInvalidBaseUris()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.AddEventHandler<ProcessRequestContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    var request = context.Transaction.GetHttpRequest()!;
+                    request.Host = new HostString("fabrikam.com:100000");
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(int.MinValue);
+            });
+
+            options.AddEventHandler<ProcessRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    // Assert
+                    Assert.Null(context.BaseUri);
+                    Assert.Null(context.RequestUri);
+                    Assert.Equal(OpenIddictServerEndpointType.Unknown, context.EndpointType);
+
+                    return ValueTask.CompletedTask;
+                }));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        await client.GetAsync("/.well-known/openid-configuration", new OpenIddictRequest());
+    }
+
+#if !NET
+    [Fact]
+    public async Task ProcessRequest_IgnoresInvalidRequestUris()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.AddEventHandler<ProcessRequestContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    var request = context.Transaction.GetHttpRequest()!;
+                    request.QueryString = new QueryString("?" + new string([.. Enumerable.Repeat('x', 100_000)]));
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(int.MinValue);
+            });
+
+            options.AddEventHandler<ProcessRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    // Assert
+                    Assert.NotNull(context.BaseUri);
+                    Assert.Null(context.RequestUri);
+                    Assert.Equal(OpenIddictServerEndpointType.Unknown, context.EndpointType);
+
+                    return ValueTask.CompletedTask;
+                }));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        await client.GetAsync("/.well-known/openid-configuration", new OpenIddictRequest());
+    }
+#endif
+
+    [Fact]
     public async Task ProcessAuthentication_CreationDateIsMappedToIssuedUtc()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
-            options.SetUserinfoEndpointUris("/authenticate/properties");
+            options.SetUserInfoEndpointUris("/authenticate/properties");
 
-            options.AddEventHandler<HandleUserinfoRequestContext>(builder =>
+            options.AddEventHandler<HandleUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
             options.AddEventHandler<ValidateTokenContext>(builder =>
@@ -53,14 +135,14 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                 builder.UseInlineHandler(context =>
                 {
                     Assert.Equal("access_token", context.Token);
-                    Assert.Equal(new[] { TokenTypeHints.AccessToken }, context.ValidTokenTypes);
+                    Assert.Equal([TokenTypeIdentifiers.AccessToken], context.ValidTokenTypes);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetClaim(Claims.Subject, "Bob le Magnifique")
                         .SetCreationDate(new DateTimeOffset(2020, 01, 01, 00, 00, 00, TimeSpan.Zero));
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -77,7 +159,7 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
 
         // Assert
         var properties = new AuthenticationProperties(response.GetParameters()
-            .ToDictionary(parameter => parameter.Key, parameter => (string?) parameter.Value));
+            .ToDictionary(parameter => parameter.Key, parameter => (string?) parameter.Value, StringComparer.Ordinal));
 
         Assert.Equal(new DateTimeOffset(2020, 01, 01, 00, 00, 00, TimeSpan.Zero), properties.IssuedUtc);
     }
@@ -89,14 +171,14 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
-            options.SetUserinfoEndpointUris("/authenticate/properties");
+            options.SetUserInfoEndpointUris("/authenticate/properties");
 
-            options.AddEventHandler<HandleUserinfoRequestContext>(builder =>
+            options.AddEventHandler<HandleUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
             options.AddEventHandler<ValidateTokenContext>(builder =>
@@ -104,13 +186,13 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                 builder.UseInlineHandler(context =>
                 {
                     Assert.Equal("access_token", context.Token);
-                    Assert.Equal(new[] { TokenTypeHints.AccessToken }, context.ValidTokenTypes);
+                    Assert.Equal([TokenTypeIdentifiers.AccessToken], context.ValidTokenTypes);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetExpirationDate(new DateTimeOffset(2120, 01, 01, 00, 00, 00, TimeSpan.Zero));
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -127,9 +209,99 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
 
         // Assert
         var properties = new AuthenticationProperties(response.GetParameters()
-            .ToDictionary(parameter => parameter.Key, parameter => (string?) parameter.Value));
+            .ToDictionary(parameter => parameter.Key, parameter => (string?) parameter.Value, StringComparer.Ordinal));
 
         Assert.Equal(new DateTimeOffset(2120, 01, 01, 00, 00, 00, TimeSpan.Zero), properties.ExpiresUtc);
+    }
+
+    [Fact]
+    public async Task ProcessAuthentication_CustomPropertiesAreAddedForErroredAuthenticationResults()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+            options.SetAuthorizationEndpointUris("/authenticate/properties");
+
+            options.UseAspNetCore()
+                   .EnableErrorPassthrough()
+                   .EnableAuthorizationEndpointPassthrough();
+
+            options.AddEventHandler<ProcessAuthenticationContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    context.RejectIdentityToken = true;
+
+                    context.Properties["custom_property"] = "value";
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(EvaluateValidatedTokens.Descriptor.Order + 1);
+            });
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/authenticate/properties", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            IdTokenHint = "id_token_hint",
+            Nonce = "n-0S6_WzA2Mj",
+            RedirectUri = "http://www.fabrikam.com/path",
+            ResponseType = "id_token",
+            Scope = Scopes.OpenId
+        });
+
+        // Assert
+        var properties = new AuthenticationProperties(response.GetParameters()
+            .ToDictionary(parameter => parameter.Key, parameter => (string?) parameter.Value, StringComparer.Ordinal));
+
+        Assert.Equal("value", properties.Items["custom_property"]);
+    }
+
+    [Fact]
+    public async Task ProcessChallenge_ImportsAuthenticationProperties()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+            options.SetTokenEndpointUris("/challenge/custom");
+
+            options.AddEventHandler<HandleTokenRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    context.SkipRequest();
+
+                    return ValueTask.CompletedTask;
+                }));
+
+            options.AddEventHandler<ProcessChallengeContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("value", context.Properties["custom_property"]);
+
+                    return ValueTask.CompletedTask;
+                }));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/challenge/custom", new OpenIddictRequest
+        {
+            GrantType = GrantTypes.Password,
+            Username = "johndoe",
+            Password = "A3ddj3w"
+        });
+
+        // Assert
+        Assert.NotNull(response.Error);
+        Assert.NotNull(response.ErrorDescription);
+        Assert.NotNull(response.ErrorUri);
     }
 
     [Fact]
@@ -146,7 +318,7 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -167,10 +339,14 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
         Assert.Equal(JsonValueKind.Number, ((JsonElement) response["integer_parameter"]).ValueKind);
         Assert.Equal("Bob l'Eponge", (string?) response["string_parameter"]);
         Assert.Equal(JsonValueKind.String, ((JsonElement) response["string_parameter"]).ValueKind);
-        Assert.Equal(new[] { "Contoso", "Fabrikam" }, (string[]?) response["array_parameter"]);
+        Assert.Equal<IEnumerable<string?>?>(["Contoso", "Fabrikam"], (ImmutableArray<string?>?) response["array_parameter"]);
         Assert.Equal(JsonValueKind.Array, ((JsonElement) response["array_parameter"]).ValueKind);
         Assert.Equal("value", (string?) response["object_parameter"]?["parameter"]);
         Assert.Equal(JsonValueKind.Object, ((JsonElement) response["object_parameter"]).ValueKind);
+        Assert.Equal<IEnumerable<string?>?>(["Contoso", "Fabrikam"], (ImmutableArray<string?>?) response["node_array_parameter"]);
+        Assert.IsType<JsonArray>((JsonNode?) response["node_array_parameter"]);
+        Assert.Equal("value", (string?) response["node_object_parameter"]?["parameter"]);
+        Assert.IsType<JsonObject>((JsonNode?) response["node_object_parameter"]);
     }
 
     [Fact]
@@ -187,7 +363,7 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -208,421 +384,17 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
     }
 
     [Theory]
-    [InlineData("/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/authorize", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("/CONNECT/AUTHORIZE", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("/connect/authorize/", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("/CONNECT/AUTHORIZE/", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("/connect/authorize/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/AUTHORIZE/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/authorize/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/AUTHORIZE/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/.well-known/openid-configuration", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("/.WELL-KNOWN/OPENID-CONFIGURATION", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("/.well-known/openid-configuration/", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("/.WELL-KNOWN/OPENID-CONFIGURATION/", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("/.well-known/openid-configuration/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/.WELL-KNOWN/OPENID-CONFIGURATION/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/.well-known/openid-configuration/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/.WELL-KNOWN/OPENID-CONFIGURATION/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/.well-known/jwks", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("/.WELL-KNOWN/JWKS", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("/.well-known/jwks/", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("/.WELL-KNOWN/JWKS/", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("/.well-known/jwks/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/.WELL-KNOWN/JWKS/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/.well-known/jwks/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/.WELL-KNOWN/JWKS/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/device", OpenIddictServerEndpointType.Device)]
-    [InlineData("/CONNECT/DEVICE", OpenIddictServerEndpointType.Device)]
-    [InlineData("/connect/device/", OpenIddictServerEndpointType.Device)]
-    [InlineData("/CONNECT/DEVICE/", OpenIddictServerEndpointType.Device)]
-    [InlineData("/connect/device/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/DEVICE/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/device/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/DEVICE/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/introspect", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("/CONNECT/INTROSPECT", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("/connect/introspect/", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("/CONNECT/INTROSPECT/", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("/connect/introspect/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/INTROSPECT/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/introspect/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/INTROSPECT/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/logout", OpenIddictServerEndpointType.Logout)]
-    [InlineData("/CONNECT/LOGOUT", OpenIddictServerEndpointType.Logout)]
-    [InlineData("/connect/logout/", OpenIddictServerEndpointType.Logout)]
-    [InlineData("/CONNECT/LOGOUT/", OpenIddictServerEndpointType.Logout)]
-    [InlineData("/connect/logout/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/LOGOUT/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/logout/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/LOGOUT/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/revoke", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("/CONNECT/REVOKE", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("/connect/revoke/", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("/CONNECT/REVOKE/", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("/connect/revoke/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/REVOKE/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/revoke/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/REVOKE/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/token", OpenIddictServerEndpointType.Token)]
-    [InlineData("/CONNECT/TOKEN", OpenIddictServerEndpointType.Token)]
-    [InlineData("/connect/token/", OpenIddictServerEndpointType.Token)]
-    [InlineData("/CONNECT/TOKEN/", OpenIddictServerEndpointType.Token)]
-    [InlineData("/connect/token/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/TOKEN/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/token/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/TOKEN/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/userinfo", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("/CONNECT/USERINFO", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("/connect/userinfo/", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("/CONNECT/USERINFO/", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("/connect/userinfo/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/USERINFO/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/userinfo/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/USERINFO/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/verification", OpenIddictServerEndpointType.Verification)]
-    [InlineData("/CONNECT/VERIFICATION", OpenIddictServerEndpointType.Verification)]
-    [InlineData("/connect/verification/", OpenIddictServerEndpointType.Verification)]
-    [InlineData("/CONNECT/VERIFICATION/", OpenIddictServerEndpointType.Verification)]
-    [InlineData("/connect/verification/subpath", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/VERIFICATION/SUBPATH", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/connect/verification/subpath/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/CONNECT/VERIFICATION/SUBPATH/", OpenIddictServerEndpointType.Unknown)]
-    public async Task ProcessRequest_MatchesCorrespondingRelativeEndpoint(string path, OpenIddictServerEndpointType type)
-    {
-        // Arrange
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.EnableDegradedMode();
-
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
-                builder.UseInlineHandler(context =>
-                {
-                    context.SkipRequest();
-
-                    return default;
-                }));
-
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
-                builder.UseInlineHandler(context =>
-                {
-                    context.SkipRequest();
-
-                    return default;
-                }));
-
-            options.AddEventHandler<ProcessRequestContext>(builder =>
-                builder.UseInlineHandler(context =>
-                {
-                    // Assert
-                    Assert.Equal(type, context.EndpointType);
-
-                    return default;
-                }));
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        await client.PostAsync(path, new OpenIddictRequest());
-    }
-
-    [Theory]
-    [InlineData("https://localhost/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:443/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:443/connect", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:443/connect/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/authorize", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/AUTHORIZE", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("https://localhost/connect/authorize/", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/AUTHORIZE/", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("https://localhost:443/connect/authorize", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/AUTHORIZE", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("https://localhost:443/connect/authorize/", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/AUTHORIZE/", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("https://fabrikam.com/connect/authorize", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/AUTHORIZE", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/connect/authorize/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/AUTHORIZE/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/authorize", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/AUTHORIZE", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/authorize/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/AUTHORIZE/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/.well-known/openid-configuration", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("HTTPS://LOCALHOST/.WELL-KNOWN/OPENID-CONFIGURATION", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("https://localhost/.well-known/openid-configuration/", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("HTTPS://LOCALHOST/.WELL-KNOWN/OPENID-CONFIGURATION/", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("https://localhost:443/.well-known/openid-configuration", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("HTTPS://LOCALHOST:443/.WELL-KNOWN/OPENID-CONFIGURATION", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("https://localhost:443/.well-known/openid-configuration/", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("HTTPS://LOCALHOST:443/.WELL-KNOWN/OPENID-CONFIGURATION/", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("https://fabrikam.com/.well-known/openid-configuration", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/.WELL-KNOWN/OPENID-CONFIGURATION", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/.well-known/openid-configuration/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/.WELL-KNOWN/OPENID-CONFIGURATION/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/.well-known/openid-configuration", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/.WELL-KNOWN/OPENID-CONFIGURATION", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/.well-known/openid-configuration/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/.WELL-KNOWN/OPENID-CONFIGURATION/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/.well-known/jwks", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("HTTPS://LOCALHOST/.WELL-KNOWN/JWKS", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("https://localhost/.well-known/jwks/", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("HTTPS://LOCALHOST/.WELL-KNOWN/JWKS/", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("https://localhost:443/.well-known/jwks", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("HTTPS://LOCALHOST:443/.WELL-KNOWN/JWKS", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("https://localhost:443/.well-known/jwks/", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("HTTPS://LOCALHOST:443/.WELL-KNOWN/JWKS/", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("https://fabrikam.com/.well-known/jwks", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/.WELL-KNOWN/JWKS", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/.well-known/jwks/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/.WELL-KNOWN/JWKS/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/.well-known/jwks", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/.WELL-KNOWN/JWKS", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/.well-known/jwks/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/.WELL-KNOWN/JWKS/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/device", OpenIddictServerEndpointType.Device)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/DEVICE", OpenIddictServerEndpointType.Device)]
-    [InlineData("https://localhost/connect/device/", OpenIddictServerEndpointType.Device)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/DEVICE/", OpenIddictServerEndpointType.Device)]
-    [InlineData("https://localhost:443/connect/device", OpenIddictServerEndpointType.Device)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/DEVICE", OpenIddictServerEndpointType.Device)]
-    [InlineData("https://localhost:443/connect/device/", OpenIddictServerEndpointType.Device)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/DEVICE/", OpenIddictServerEndpointType.Device)]
-    [InlineData("https://fabrikam.com/connect/device", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/DEVICE", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/connect/device/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/DEVICE/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/device", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/DEVICE", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/device/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/DEVICE/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/introspect", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/INTROSPECT", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("https://localhost/connect/introspect/", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/INTROSPECT/", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("https://localhost:443/connect/introspect", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/INTROSPECT", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("https://localhost:443/connect/introspect/", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/INTROSPECT/", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("https://fabrikam.com/connect/introspect", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/INTROSPECT", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/connect/introspect/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/INTROSPECT/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/introspect", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/INTROSPECT", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/introspect/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/INTROSPECT/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/logout", OpenIddictServerEndpointType.Logout)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/LOGOUT", OpenIddictServerEndpointType.Logout)]
-    [InlineData("https://localhost/connect/logout/", OpenIddictServerEndpointType.Logout)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/LOGOUT/", OpenIddictServerEndpointType.Logout)]
-    [InlineData("https://localhost:443/connect/logout", OpenIddictServerEndpointType.Logout)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/LOGOUT", OpenIddictServerEndpointType.Logout)]
-    [InlineData("https://localhost:443/connect/logout/", OpenIddictServerEndpointType.Logout)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/LOGOUT/", OpenIddictServerEndpointType.Logout)]
-    [InlineData("https://fabrikam.com/connect/logout", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/LOGOUT", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/connect/logout/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/LOGOUT/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/logout", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/LOGOUT", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/logout/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/LOGOUT/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/revoke", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/REVOKE", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("https://localhost/connect/revoke/", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/REVOKE/", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("https://localhost:443/connect/revoke", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/REVOKE", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("https://localhost:443/connect/revoke/", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/REVOKE/", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("https://fabrikam.com/connect/revoke", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/REVOKE", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/connect/revoke/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/REVOKE/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/revoke", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/REVOKE", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/revoke/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/REVOKE/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/token", OpenIddictServerEndpointType.Token)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/TOKEN", OpenIddictServerEndpointType.Token)]
-    [InlineData("https://localhost/connect/token/", OpenIddictServerEndpointType.Token)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/TOKEN/", OpenIddictServerEndpointType.Token)]
-    [InlineData("https://localhost:443/connect/token", OpenIddictServerEndpointType.Token)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/TOKEN", OpenIddictServerEndpointType.Token)]
-    [InlineData("https://localhost:443/connect/token/", OpenIddictServerEndpointType.Token)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/TOKEN/", OpenIddictServerEndpointType.Token)]
-    [InlineData("https://fabrikam.com/connect/token", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/TOKEN", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/connect/token/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/TOKEN/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/token", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/TOKEN", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/token/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/TOKEN/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/userinfo", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/USERINFO", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("https://localhost/connect/userinfo/", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/USERINFO/", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("https://localhost:443/connect/userinfo", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/USERINFO", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("https://localhost:443/connect/userinfo/", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/USERINFO/", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("https://fabrikam.com/connect/userinfo", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/USERINFO", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/connect/userinfo/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/USERINFO/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/userinfo", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/USERINFO", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/userinfo/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/USERINFO/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost/connect/verification", OpenIddictServerEndpointType.Verification)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/VERIFICATION", OpenIddictServerEndpointType.Verification)]
-    [InlineData("https://localhost/connect/verification/", OpenIddictServerEndpointType.Verification)]
-    [InlineData("HTTPS://LOCALHOST/CONNECT/VERIFICATION/", OpenIddictServerEndpointType.Verification)]
-    [InlineData("https://localhost:443/connect/verification", OpenIddictServerEndpointType.Verification)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/VERIFICATION", OpenIddictServerEndpointType.Verification)]
-    [InlineData("https://localhost:443/connect/verification/", OpenIddictServerEndpointType.Verification)]
-    [InlineData("HTTPS://LOCALHOST:443/CONNECT/VERIFICATION/", OpenIddictServerEndpointType.Verification)]
-    [InlineData("https://fabrikam.com/connect/verification", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/VERIFICATION", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://fabrikam.com/connect/verification/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://FABRIKAM.COM/CONNECT/VERIFICATION/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/verification", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/VERIFICATION", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("https://localhost:8888/connect/verification/", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("HTTPS://LOCALHOST:8888/CONNECT/VERIFICATION/", OpenIddictServerEndpointType.Unknown)]
-    public async Task ProcessRequest_MatchesCorrespondingAbsoluteEndpoint(string path, OpenIddictServerEndpointType type)
-    {
-        // Arrange
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.EnableDegradedMode();
-
-            options.SetAuthorizationEndpointUris("https://localhost/connect/authorize")
-                   .SetConfigurationEndpointUris("https://localhost/.well-known/openid-configuration")
-                   .SetCryptographyEndpointUris("https://localhost/.well-known/jwks")
-                   .SetDeviceEndpointUris("https://localhost/connect/device")
-                   .SetIntrospectionEndpointUris("https://localhost/connect/introspect")
-                   .SetLogoutEndpointUris("https://localhost/connect/logout")
-                   .SetRevocationEndpointUris("https://localhost/connect/revoke")
-                   .SetTokenEndpointUris("https://localhost/connect/token")
-                   .SetUserinfoEndpointUris("https://localhost/connect/userinfo")
-                   .SetVerificationEndpointUris("https://localhost/connect/verification");
-
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
-                builder.UseInlineHandler(context =>
-                {
-                    context.SkipRequest();
-
-                    return default;
-                }));
-
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
-                builder.UseInlineHandler(context =>
-                {
-                    context.SkipRequest();
-
-                    return default;
-                }));
-
-            options.AddEventHandler<ProcessRequestContext>(builder =>
-                builder.UseInlineHandler(context =>
-                {
-                    // Assert
-                    Assert.Equal(type, context.EndpointType);
-
-                    return default;
-                }));
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        await client.PostAsync(path, new OpenIddictRequest());
-    }
-
-    [Theory]
-    [InlineData("/custom/connect/authorize", OpenIddictServerEndpointType.Authorization)]
-    [InlineData("/custom/.well-known/openid-configuration", OpenIddictServerEndpointType.Configuration)]
-    [InlineData("/custom/.well-known/jwks", OpenIddictServerEndpointType.Cryptography)]
-    [InlineData("/custom/connect/device", OpenIddictServerEndpointType.Device)]
-    [InlineData("/custom/connect/custom", OpenIddictServerEndpointType.Unknown)]
-    [InlineData("/custom/connect/introspect", OpenIddictServerEndpointType.Introspection)]
-    [InlineData("/custom/connect/logout", OpenIddictServerEndpointType.Logout)]
-    [InlineData("/custom/connect/revoke", OpenIddictServerEndpointType.Revocation)]
-    [InlineData("/custom/connect/token", OpenIddictServerEndpointType.Token)]
-    [InlineData("/custom/connect/userinfo", OpenIddictServerEndpointType.Userinfo)]
-    [InlineData("/custom/connect/verification", OpenIddictServerEndpointType.Verification)]
-    public async Task ProcessRequest_AllowsOverridingEndpoint(string address, OpenIddictServerEndpointType type)
-    {
-        // Arrange
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.EnableDegradedMode();
-
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
-                builder.UseInlineHandler(context =>
-                {
-                    context.SkipRequest();
-
-                    return default;
-                }));
-
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
-                builder.UseInlineHandler(context =>
-                {
-                    context.SkipRequest();
-
-                    return default;
-                }));
-
-            options.AddEventHandler<ProcessRequestContext>(builder =>
-            {
-                builder.UseInlineHandler(context =>
-                {
-                    // Act
-                    context.EndpointType = type;
-
-                    // Assert
-                    Assert.Equal(type, context.EndpointType);
-
-                    return default;
-                });
-
-                builder.SetOrder(InferEndpointType.Descriptor.Order + 500);
-            });
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        await client.PostAsync(address, new OpenIddictRequest());
-    }
-
-    [Theory]
     [InlineData("/.well-known/openid-configuration")]
     [InlineData("/.well-known/jwks")]
     [InlineData("/connect/authorize")]
     [InlineData("/connect/device")]
     [InlineData("/connect/introspect")]
-    [InlineData("/connect/logout")]
+    [InlineData("/connect/endsession")]
     [InlineData("/connect/revoke")]
     [InlineData("/connect/token")]
     [InlineData("/connect/userinfo")]
     [InlineData("/connect/verification")]
-    public async Task ProcessRequest_RejectsInsecureHttpRequests(string address)
+    public async Task ProcessRequest_RejectsInsecureHttpRequests(string uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -636,7 +408,7 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync(address, new OpenIddictRequest());
+        var response = await client.PostAsync(uri, new OpenIddictRequest());
 
         // Assert
         Assert.Equal(Errors.InvalidRequest, response.Error);
@@ -651,12 +423,12 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
     [InlineData("/connect/authorize")]
     [InlineData("/connect/device")]
     [InlineData("/connect/introspect")]
-    [InlineData("/connect/logout")]
+    [InlineData("/connect/endsession")]
     [InlineData("/connect/revoke")]
     [InlineData("/connect/token")]
     [InlineData("/connect/userinfo")]
     [InlineData("/connect/verification")]
-    public async Task ProcessRequest_AllowsHandlingResponse(string address)
+    public async Task ProcessRequest_AllowsHandlingResponse(string uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -673,14 +445,14 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync(address, new OpenIddictRequest());
+        var response = await client.PostAsync(uri, new OpenIddictRequest());
 
         // Assert
         Assert.Equal("Bob le Bricoleur", (string?) response["name"]);
@@ -693,12 +465,12 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
     [InlineData("/connect/authorize")]
     [InlineData("/connect/device")]
     [InlineData("/connect/introspect")]
-    [InlineData("/connect/logout")]
+    [InlineData("/connect/endsession")]
     [InlineData("/connect/revoke")]
     [InlineData("/connect/token")]
     [InlineData("/connect/userinfo")]
     [InlineData("/connect/verification")]
-    public async Task ProcessRequest_AllowsSkippingHandler(string address)
+    public async Task ProcessRequest_AllowsSkippingHandler(string uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -710,17 +482,57 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync(address, new OpenIddictRequest());
+        var response = await client.PostAsync(uri, new OpenIddictRequest());
 
         // Assert
         Assert.Equal("Bob le Magnifique", (string?) response["name"]);
+    }
+
+    [Fact]
+    public async Task ProcessSignIn_ImportsAuthenticationProperties()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+            options.SetTokenEndpointUris("/signin/custom");
+
+            options.AddEventHandler<HandleTokenRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    context.SkipRequest();
+
+                    return ValueTask.CompletedTask;
+                }));
+
+            options.AddEventHandler<ProcessSignInContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("value", context.Properties["custom_property"]);
+
+                    return ValueTask.CompletedTask;
+                }));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/signin/custom", new OpenIddictRequest
+        {
+            GrantType = GrantTypes.Password,
+            Username = "johndoe",
+            Password = "A3ddj3w"
+        });
+
+        // Assert
+        Assert.NotNull(response.AccessToken);
     }
 
     [Fact]
@@ -737,7 +549,7 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -758,10 +570,53 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
         Assert.Equal(JsonValueKind.Number, ((JsonElement) response["integer_parameter"]).ValueKind);
         Assert.Equal("Bob l'Eponge", (string?) response["string_parameter"]);
         Assert.Equal(JsonValueKind.String, ((JsonElement) response["string_parameter"]).ValueKind);
-        Assert.Equal(new[] { "Contoso", "Fabrikam" }, (string[]?) response["array_parameter"]);
+        Assert.Equal<IEnumerable<string?>?>(["Contoso", "Fabrikam"], (ImmutableArray<string?>?) response["array_parameter"]);
         Assert.Equal(JsonValueKind.Array, ((JsonElement) response["array_parameter"]).ValueKind);
         Assert.Equal("value", (string?) response["object_parameter"]?["parameter"]);
         Assert.Equal(JsonValueKind.Object, ((JsonElement) response["object_parameter"]).ValueKind);
+        Assert.Equal<IEnumerable<string?>?>(["Contoso", "Fabrikam"], (ImmutableArray<string?>?) response["node_array_parameter"]);
+        Assert.IsType<JsonArray>((JsonNode?) response["node_array_parameter"]);
+        Assert.Equal("value", (string?) response["node_object_parameter"]?["parameter"]);
+        Assert.IsType<JsonObject>((JsonNode?) response["node_object_parameter"]);
+    }
+
+    [Fact]
+    public async Task ProcessSignOut_ImportsAuthenticationProperties()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+            options.SetEndSessionEndpointUris("/signout/custom");
+
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    context.SkipRequest();
+
+                    return ValueTask.CompletedTask;
+                }));
+
+            options.AddEventHandler<ProcessSignOutContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("value", context.Properties["custom_property"]);
+
+                    return ValueTask.CompletedTask;
+                }));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/signout/custom", new OpenIddictRequest
+        {
+            PostLogoutRedirectUri = "http://www.fabrikam.com/path",
+            State = "af0ifjsldkj"
+        });
+
+        // Assert
+        Assert.NotNull(response.State);
     }
 
     [Fact]
@@ -771,14 +626,14 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
-            options.SetLogoutEndpointUris("/signout/custom");
+            options.SetEndSessionEndpointUris("/signout/custom");
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -797,19 +652,10 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
         Assert.Equal("Bob l'Eponge", (string?) response["string_parameter"]);
     }
 
-    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
-        Justification = "The caller is responsible of disposing the test server.")]
-    protected override
-#if SUPPORTS_GENERIC_HOST
-        async
-#endif
-        ValueTask<OpenIddictServerIntegrationTestServer> CreateServerAsync(Action<OpenIddictServerBuilder>? configuration = null)
+    protected override async ValueTask<OpenIddictServerIntegrationTestServer> CreateServerAsync(
+        Action<OpenIddictServerBuilder>? configuration = null)
     {
-#if SUPPORTS_GENERIC_HOST
         var builder = new HostBuilder();
-#else
-        var builder = new WebHostBuilder();
-#endif
         builder.UseEnvironment("Testing");
 
         builder.ConfigureLogging(options => options.AddXUnit(OutputHelper));
@@ -828,25 +674,15 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                 });
         });
 
-#if SUPPORTS_GENERIC_HOST
         builder.ConfigureWebHost(options =>
         {
             options.UseTestServer();
             options.Configure(ConfigurePipeline);
         });
-#else
-        builder.Configure(ConfigurePipeline);
-#endif
 
-#if SUPPORTS_GENERIC_HOST
         var host = await builder.StartAsync();
 
         return new OpenIddictServerAspNetCoreIntegrationTestServer(host);
-#else
-        var server = new TestServer(builder);
-
-        return new ValueTask<OpenIddictServerIntegrationTestServer>(new OpenIddictServerAspNetCoreIntegrationTestServer(server));
-#endif
 
         void ConfigurePipeline(IApplicationBuilder app)
         {
@@ -878,7 +714,7 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                     return;
                 }
 
-                else if (context.Request.Path == "/signin/custom")
+                if (context.Request.Path == "/signin/custom")
                 {
                     var identity = new ClaimsIdentity(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
                     identity.AddClaim(Claims.Subject, "Bob le Bricoleur");
@@ -886,31 +722,39 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                     var principal = new ClaimsPrincipal(identity);
 
                     var properties = new AuthenticationProperties(
-                        items: new Dictionary<string, string?>(),
-                        parameters: new Dictionary<string, object?>
+                        items: new Dictionary<string, string?>(StringComparer.Ordinal)
+                        {
+                            ["custom_property"] = "value"
+                        },
+                        parameters: new Dictionary<string, object?>(StringComparer.Ordinal)
                         {
                             ["boolean_parameter"] = true,
                             ["integer_parameter"] = 42,
                             ["string_parameter"] = "Bob l'Eponge",
                             ["array_parameter"] = JsonSerializer.Deserialize<JsonElement>(@"[""Contoso"",""Fabrikam""]"),
-                            ["object_parameter"] = JsonSerializer.Deserialize<JsonElement>(@"{""parameter"":""value""}")
+                            ["object_parameter"] = JsonSerializer.Deserialize<JsonElement>(@"{""parameter"":""value""}"),
+                            ["node_array_parameter"] = new JsonArray("Contoso", "Fabrikam"),
+                            ["node_object_parameter"] = new JsonObject { ["parameter"] = "value" }
                         });
 
                     await context.SignInAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, principal, properties);
                     return;
                 }
 
-                else if (context.Request.Path == "/signout")
+                if (context.Request.Path == "/signout")
                 {
                     await context.SignOutAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
                     return;
                 }
 
-                else if (context.Request.Path == "/signout/custom")
+                if (context.Request.Path == "/signout/custom")
                 {
                     var properties = new AuthenticationProperties(
-                        items: new Dictionary<string, string?>(),
-                        parameters: new Dictionary<string, object?>
+                        items: new Dictionary<string, string?>(StringComparer.Ordinal)
+                        {
+                            ["custom_property"] = "value"
+                        },
+                        parameters: new Dictionary<string, object?>(StringComparer.Ordinal)
                         {
                             ["boolean_parameter"] = true,
                             ["integer_parameter"] = 42,
@@ -921,35 +765,39 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                     return;
                 }
 
-                else if (context.Request.Path == "/challenge")
+                if (context.Request.Path == "/challenge")
                 {
                     await context.ChallengeAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
                     return;
                 }
 
-                else if (context.Request.Path == "/challenge/custom")
+                if (context.Request.Path == "/challenge/custom")
                 {
                     var properties = new AuthenticationProperties(
-                        items: new Dictionary<string, string?>
+                        items: new Dictionary<string, string?>(StringComparer.Ordinal)
                         {
                             [OpenIddictServerAspNetCoreConstants.Properties.Error] = "custom_error",
                             [OpenIddictServerAspNetCoreConstants.Properties.ErrorDescription] = "custom_error_description",
-                            [OpenIddictServerAspNetCoreConstants.Properties.ErrorUri] = "custom_error_uri"
+                            [OpenIddictServerAspNetCoreConstants.Properties.ErrorUri] = "custom_error_uri",
+
+                            ["custom_property"] = "value"
                         },
-                        parameters: new Dictionary<string, object?>
+                        parameters: new Dictionary<string, object?>(StringComparer.Ordinal)
                         {
                             ["boolean_parameter"] = true,
                             ["integer_parameter"] = 42,
                             ["string_parameter"] = "Bob l'Eponge",
                             ["array_parameter"] = JsonSerializer.Deserialize<JsonElement>(@"[""Contoso"",""Fabrikam""]"),
-                            ["object_parameter"] = JsonSerializer.Deserialize<JsonElement>(@"{""parameter"":""value""}")
+                            ["object_parameter"] = JsonSerializer.Deserialize<JsonElement>(@"{""parameter"":""value""}"),
+                            ["node_array_parameter"] = new JsonArray("Contoso", "Fabrikam"),
+                            ["node_object_parameter"] = new JsonObject { ["parameter"] = "value" }
                         });
 
                     await context.ChallengeAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, properties);
                     return;
                 }
 
-                else if (context.Request.Path == "/authenticate")
+                if (context.Request.Path == "/authenticate")
                 {
                     var result = await context.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
                     if (result?.Principal is null)
@@ -957,16 +805,15 @@ public partial class OpenIddictServerAspNetCoreIntegrationTests : OpenIddictServ
                         return;
                     }
 
-                    var claims = result.Principal.Claims.GroupBy(claim => claim.Type)
-                        .Select(group => new KeyValuePair<string, string?[]?>(
-                            group.Key, group.Select(claim => claim.Value).ToArray()));
+                    var claims = result.Principal.Claims.GroupBy(claim => claim.Type, StringComparer.Ordinal)
+                        .Select(group => KeyValuePair.Create(group.Key, group.Select(claim => claim.Value).ToImmutableArray<string?>()));
 
                     context.Response.ContentType = "application/json";
                     await context.Response.WriteAsync(JsonSerializer.Serialize(new OpenIddictResponse(claims)));
                     return;
                 }
 
-                else if (context.Request.Path == "/authenticate/properties")
+                if (context.Request.Path == "/authenticate/properties")
                 {
                     var result = await context.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
                     if (result?.Properties is null)

@@ -14,7 +14,7 @@ public static partial class OpenIddictServerEvents
     /// Represents an event called for each request to the token endpoint to give the user code
     /// a chance to manually extract the token request from the ambient HTTP context.
     /// </summary>
-    public class ExtractTokenRequestContext : BaseValidatingContext
+    public sealed class ExtractTokenRequestContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ExtractTokenRequestContext"/> class.
@@ -25,7 +25,7 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it wasn't extracted yet.
+        /// Gets or sets the request, or <see langword="null"/> if it wasn't extracted yet.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -38,7 +38,7 @@ public static partial class OpenIddictServerEvents
     /// Represents an event called for each request to the token endpoint
     /// to determine if the request is valid and should continue to be processed.
     /// </summary>
-    public class ValidateTokenRequestContext : BaseValidatingClientContext
+    public sealed class ValidateTokenRequestContext : BaseValidatingClientContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ValidateTokenRequestContext"/> class.
@@ -58,17 +58,36 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets or sets the security principal extracted from the authorization
-        /// code or the refresh token, if applicable to the current token request.
+        /// Gets or sets the security principal extracted from the actor token, if applicable.
         /// </summary>
-        public ClaimsPrincipal? Principal { get; set; }
+        public ClaimsPrincipal? ActorTokenPrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the authorization code, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? AuthorizationCodePrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the device code, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? DeviceCodePrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the refresh token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? RefreshTokenPrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the subject token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? SubjectTokenPrincipal { get; set; }
     }
 
     /// <summary>
     /// Represents an event called for each validated token request
     /// to allow the user code to decide how the request should be handled.
     /// </summary>
-    public class HandleTokenRequestContext : BaseValidatingTicketContext
+    public sealed class HandleTokenRequestContext : BaseValidatingTicketContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="HandleTokenRequestContext"/> class.
@@ -86,6 +105,31 @@ public static partial class OpenIddictServerEvents
             get => Transaction.Request!;
             set => Transaction.Request = value;
         }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the actor token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? ActorTokenPrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the authorization code, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? AuthorizationCodePrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the device code, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? DeviceCodePrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the refresh token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? RefreshTokenPrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the subject token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? SubjectTokenPrincipal { get; set; }
 
         /// <summary>
         /// Gets the additional parameters returned to the client application.
@@ -114,7 +158,7 @@ public static partial class OpenIddictServerEvents
     /// <summary>
     /// Represents an event called before the token response is returned to the caller.
     /// </summary>
-    public class ApplyTokenResponseContext : BaseRequestContext
+    public sealed class ApplyTokenResponseContext : BaseRequestContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ApplyTokenResponseContext"/> class.
@@ -125,7 +169,7 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it couldn't be extracted.
+        /// Gets or sets the request, or <see langword="null"/> if it couldn't be extracted.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -145,7 +189,7 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets the error code returned to the client application.
         /// When the response indicates a successful response,
-        /// this property returns <c>null</c>.
+        /// this property returns <see langword="null"/>.
         /// </summary>
         public string? Error => Response.Error;
     }

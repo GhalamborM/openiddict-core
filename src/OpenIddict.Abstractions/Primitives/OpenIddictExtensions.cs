@@ -7,10 +7,12 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Primitives;
 
 namespace OpenIddict.Abstractions;
@@ -27,26 +29,72 @@ public static class OpenIddictExtensions
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
     public static ImmutableArray<string> GetAcrValues(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return GetValues(request.AcrValues, Separators.Space);
+    }
+
+    /// <summary>
+    /// Extracts the audiences from an <see cref="OpenIddictRequest"/>.
+    /// </summary>
+    /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
+    public static ImmutableArray<string> GetAudiences(this OpenIddictRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Audiences is not { IsDefaultOrEmpty: false } audiences)
+        {
+            return [];
+        }
+
+        HashSet<string> set = [];
+
+        foreach (var audience in audiences)
+        {
+            if (!string.IsNullOrEmpty(audience))
+            {
+                set.Add(audience);
+            }
+        }
+
+        return [.. set];
     }
 
     /// <summary>
     /// Extracts the prompt values from an <see cref="OpenIddictRequest"/>.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    public static ImmutableArray<string> GetPrompts(this OpenIddictRequest request)
+    public static ImmutableArray<string> GetPromptValues(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return GetValues(request.Prompt, Separators.Space);
+    }
+
+    /// <summary>
+    /// Extracts the resources from an <see cref="OpenIddictRequest"/>.
+    /// </summary>
+    /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
+    public static ImmutableArray<string> GetResources(this OpenIddictRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Resources is not { IsDefaultOrEmpty: false } resources)
+        {
+            return [];
+        }
+
+        HashSet<string> set = [];
+
+        foreach (var resource in resources)
+        {
+            if (!string.IsNullOrEmpty(resource))
+            {
+                set.Add(resource);
+            }
+        }
+
+        return [.. set];
     }
 
     /// <summary>
@@ -55,10 +103,7 @@ public static class OpenIddictExtensions
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
     public static ImmutableArray<string> GetResponseTypes(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return GetValues(request.ResponseType, Separators.Space);
     }
@@ -69,10 +114,7 @@ public static class OpenIddictExtensions
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
     public static ImmutableArray<string> GetScopes(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return GetValues(request.Scope, Separators.Space);
     }
@@ -84,37 +126,79 @@ public static class OpenIddictExtensions
     /// <param name="value">The component to look for in the parameter.</param>
     public static bool HasAcrValue(this OpenIddictRequest request, string value)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (string.IsNullOrEmpty(value))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0177), nameof(value));
-        }
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(value);
 
         return HasValue(request.AcrValues, value, Separators.Space);
+    }
+
+    /// <summary>
+    /// Determines whether the requested audiences contains the specified value.
+    /// </summary>
+    /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
+    /// <param name="audience">The value to look for in the parameters.</param>
+    public static bool HasAudience(this OpenIddictRequest request, string audience)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(audience);
+
+        var audiences = request.Audiences;
+        if (audiences is null or [])
+        {
+            return false;
+        }
+
+        for (var index = 0; index < audiences.Value.Length; index++)
+        {
+            if (audiences.Value[index] is { Length: > 0 } value &&
+                string.Equals(value, audience, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
     /// Determines whether the requested prompt contains the specified value.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <param name="prompt">The component to look for in the parameter.</param>
-    public static bool HasPrompt(this OpenIddictRequest request, string prompt)
+    /// <param name="value">The component to look for in the parameter.</param>
+    public static bool HasPromptValue(this OpenIddictRequest request, string value)
     {
-        if (request is null)
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(value);
+
+        return HasValue(request.Prompt, value, Separators.Space);
+    }
+
+    /// <summary>
+    /// Determines whether the requested resources contains the specified value.
+    /// </summary>
+    /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
+    /// <param name="resource">The value to look for in the parameters.</param>
+    public static bool HasResource(this OpenIddictRequest request, string resource)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(resource);
+
+        var resources = request.Resources;
+        if (resources is null or [])
         {
-            throw new ArgumentNullException(nameof(request));
+            return false;
         }
 
-        if (string.IsNullOrEmpty(prompt))
+        for (var index = 0; index < resources.Value.Length; index++)
         {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0178), nameof(prompt));
+            if (resources.Value[index] is { Length: > 0 } value &&
+                string.Equals(value, resource, StringComparison.Ordinal))
+            {
+                return true;
+            }
         }
 
-        return HasValue(request.Prompt, prompt, Separators.Space);
+        return false;
     }
 
     /// <summary>
@@ -124,15 +208,8 @@ public static class OpenIddictExtensions
     /// <param name="type">The component to look for in the parameter.</param>
     public static bool HasResponseType(this OpenIddictRequest request, string type)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0179), nameof(type));
-        }
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         return HasValue(request.ResponseType, type, Separators.Space);
     }
@@ -144,15 +221,8 @@ public static class OpenIddictExtensions
     /// <param name="scope">The component to look for in the parameter.</param>
     public static bool HasScope(this OpenIddictRequest request, string scope)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
-
-        if (string.IsNullOrEmpty(scope))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0180), nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrEmpty(scope);
 
         return HasValue(request.Scope, scope, Separators.Space);
     }
@@ -162,13 +232,10 @@ public static class OpenIddictExtensions
     /// See http://openid.net/specs/oauth-v2-multiple-response-types-1_0.html#none for more information.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is a response_type=none request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is a response_type=none request, <see langword="false"/> otherwise.</returns>
     public static bool IsNoneFlow(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         if (string.IsNullOrEmpty(request.ResponseType))
         {
@@ -176,7 +243,7 @@ public static class OpenIddictExtensions
         }
 
         var segment = Trim(new StringSegment(request.ResponseType), Separators.Space);
-        if (segment.Length == 0)
+        if (!segment.HasValue || segment.Length is 0)
         {
             return false;
         }
@@ -189,13 +256,10 @@ public static class OpenIddictExtensions
     /// See http://tools.ietf.org/html/rfc6749#section-4.1.1 for more information.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is a code flow request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is a code flow request, <see langword="false"/> otherwise.</returns>
     public static bool IsAuthorizationCodeFlow(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         if (string.IsNullOrEmpty(request.ResponseType))
         {
@@ -203,7 +267,7 @@ public static class OpenIddictExtensions
         }
 
         var segment = Trim(new StringSegment(request.ResponseType), Separators.Space);
-        if (segment.Length == 0)
+        if (!segment.HasValue || segment.Length is 0)
         {
             return false;
         }
@@ -217,13 +281,10 @@ public static class OpenIddictExtensions
     /// http://openid.net/specs/openid-connect-core-1_0.html for more information
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is an implicit flow request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is an implicit flow request, <see langword="false"/> otherwise.</returns>
     public static bool IsImplicitFlow(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         if (string.IsNullOrEmpty(request.ResponseType))
         {
@@ -235,7 +296,7 @@ public static class OpenIddictExtensions
         foreach (var element in new StringTokenizer(request.ResponseType, Separators.Space))
         {
             var segment = Trim(element, Separators.Space);
-            if (segment.Length == 0)
+            if (!segment.HasValue || segment.Length is 0)
             {
                 continue;
             }
@@ -247,9 +308,7 @@ public static class OpenIddictExtensions
                 continue;
             }
 
-            // Note: though the OIDC core specs does not include the OAuth 2.0-inherited response_type=token,
-            // it is considered as a valid response_type for the implicit flow for backward compatibility.
-            else if (segment.Equals(ResponseTypes.Token, StringComparison.Ordinal))
+            if (segment.Equals(ResponseTypes.Token, StringComparison.Ordinal))
             {
                 flags |= /* token */ 0x02;
 
@@ -262,7 +321,7 @@ public static class OpenIddictExtensions
         }
 
         // Return true if the response_type parameter contains "id_token" or "token".
-        return (flags & /* id_token: */ 0x01) == 0x01 || (flags & /* token: */ 0x02) == 0x02;
+        return (flags & /* id_token: */ 0x01) is 0x01 || (flags & /* token: */ 0x02) is 0x02;
     }
 
     /// <summary>
@@ -271,13 +330,10 @@ public static class OpenIddictExtensions
     /// http://openid.net/specs/openid-connect-core-1_0.html for more information.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is an hybrid flow request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is an hybrid flow request, <see langword="false"/> otherwise.</returns>
     public static bool IsHybridFlow(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         if (string.IsNullOrEmpty(request.ResponseType))
         {
@@ -289,7 +345,7 @@ public static class OpenIddictExtensions
         foreach (var element in new StringTokenizer(request.ResponseType, Separators.Space))
         {
             var segment = Trim(element, Separators.Space);
-            if (segment.Length == 0)
+            if (!segment.HasValue || segment.Length is 0)
             {
                 continue;
             }
@@ -301,14 +357,14 @@ public static class OpenIddictExtensions
                 continue;
             }
 
-            else if (segment.Equals(ResponseTypes.IdToken, StringComparison.Ordinal))
+            if (segment.Equals(ResponseTypes.IdToken, StringComparison.Ordinal))
             {
                 flags |= /* id_token: */ 0x02;
 
                 continue;
             }
 
-            else if (segment.Equals(ResponseTypes.Token, StringComparison.Ordinal))
+            if (segment.Equals(ResponseTypes.Token, StringComparison.Ordinal))
             {
                 flags |= /* token: */ 0x04;
 
@@ -321,13 +377,13 @@ public static class OpenIddictExtensions
         }
 
         // Return false if the response_type parameter doesn't contain "code".
-        if ((flags & /* code: */ 0x01) != 0x01)
+        if ((flags & /* code: */ 0x01) is not 0x01)
         {
             return false;
         }
 
         // Return true if the response_type parameter contains "id_token" or "token".
-        return (flags & /* id_token: */ 0x02) == 0x02 || (flags & /* token: */ 0x04) == 0x04;
+        return (flags & /* id_token: */ 0x02) is 0x02 || (flags & /* token: */ 0x04) is 0x04;
     }
 
     /// <summary>
@@ -336,15 +392,12 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
     /// <returns>
-    /// <c>true</c> if the request specified the fragment response mode or if
-    /// it's the default value for the requested flow, <c>false</c> otherwise.
+    /// <see langword="true"/> if the request specified the fragment response mode or if
+    /// it's the default value for the requested flow, <see langword="false"/> otherwise.
     /// </returns>
     public static bool IsFragmentResponseMode(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         if (string.Equals(request.ResponseMode, ResponseModes.Fragment, StringComparison.Ordinal))
         {
@@ -369,15 +422,12 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
     /// <returns>
-    /// <c>true</c> if the request specified the query response mode or if
-    /// it's the default value for the requested flow, <c>false</c> otherwise.
+    /// <see langword="true"/> if the request specified the query response mode or if
+    /// it's the default value for the requested flow, <see langword="false"/> otherwise.
     /// </returns>
     public static bool IsQueryResponseMode(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         if (string.Equals(request.ResponseMode, ResponseModes.Query, StringComparison.Ordinal))
         {
@@ -401,15 +451,12 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
     /// <returns>
-    /// <c>true</c> if the request specified the form post response mode or if
-    /// it's the default value for the requested flow, <c>false</c> otherwise.
+    /// <see langword="true"/> if the request specified the form post response mode or if
+    /// it's the default value for the requested flow, <see langword="false"/> otherwise.
     /// </returns>
     public static bool IsFormPostResponseMode(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return string.Equals(request.ResponseMode, ResponseModes.FormPost, StringComparison.Ordinal);
     }
@@ -419,13 +466,10 @@ public static class OpenIddictExtensions
     /// See http://tools.ietf.org/html/rfc6749#section-4.1.3 for more information.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is a code grant request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is a code grant request, <see langword="false"/> otherwise.</returns>
     public static bool IsAuthorizationCodeGrantType(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return string.Equals(request.GrantType, GrantTypes.AuthorizationCode, StringComparison.Ordinal);
     }
@@ -435,13 +479,10 @@ public static class OpenIddictExtensions
     /// See http://tools.ietf.org/html/rfc6749#section-4.4.2 for more information.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is a client credentials grant request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is a client credentials grant request, <see langword="false"/> otherwise.</returns>
     public static bool IsClientCredentialsGrantType(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return string.Equals(request.GrantType, GrantTypes.ClientCredentials, StringComparison.Ordinal);
     }
@@ -451,13 +492,10 @@ public static class OpenIddictExtensions
     /// See https://tools.ietf.org/html/rfc8628 for more information.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is a device code grant request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is a device code grant request, <see langword="false"/> otherwise.</returns>
     public static bool IsDeviceCodeGrantType(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return string.Equals(request.GrantType, GrantTypes.DeviceCode, StringComparison.Ordinal);
     }
@@ -467,13 +505,10 @@ public static class OpenIddictExtensions
     /// See http://tools.ietf.org/html/rfc6749#section-4.3.2 for more information.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is a password grant request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is a password grant request, <see langword="false"/> otherwise.</returns>
     public static bool IsPasswordGrantType(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return string.Equals(request.GrantType, GrantTypes.Password, StringComparison.Ordinal);
     }
@@ -483,15 +518,25 @@ public static class OpenIddictExtensions
     /// See http://tools.ietf.org/html/rfc6749#section-6 for more information.
     /// </summary>
     /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
-    /// <returns><c>true</c> if the request is a refresh token grant request, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the request is a refresh token grant request, <see langword="false"/> otherwise.</returns>
     public static bool IsRefreshTokenGrantType(this OpenIddictRequest request)
     {
-        if (request is null)
-        {
-            throw new ArgumentNullException(nameof(request));
-        }
+        ArgumentNullException.ThrowIfNull(request);
 
         return string.Equals(request.GrantType, GrantTypes.RefreshToken, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Determines whether the "grant_type" parameter corresponds to the token exchange grant.
+    /// See https://datatracker.ietf.org/doc/html/rfc8693#section-2.1 for more information.
+    /// </summary>
+    /// <param name="request">The <see cref="OpenIddictRequest"/> instance.</param>
+    /// <returns><see langword="true"/> if the request is a token exchange grant request, <see langword="false"/> otherwise.</returns>
+    public static bool IsTokenExchangeGrantType(this OpenIddictRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return string.Equals(request.GrantType, GrantTypes.TokenExchange, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -501,16 +546,13 @@ public static class OpenIddictExtensions
     /// <returns>The destinations associated with the claim.</returns>
     public static ImmutableArray<string> GetDestinations(this Claim claim)
     {
-        if (claim is null)
-        {
-            throw new ArgumentNullException(nameof(claim));
-        }
+        ArgumentNullException.ThrowIfNull(claim);
 
         claim.Properties.TryGetValue(Properties.Destinations, out string? destinations);
 
         if (string.IsNullOrEmpty(destinations))
         {
-            return ImmutableArray.Create<string>();
+            return [];
         }
 
         using var document = JsonDocument.Parse(destinations);
@@ -537,15 +579,8 @@ public static class OpenIddictExtensions
     /// <param name="destination">The required destination.</param>
     public static bool HasDestination(this Claim claim, string destination)
     {
-        if (claim is null)
-        {
-            throw new ArgumentNullException(nameof(claim));
-        }
-
-        if (string.IsNullOrEmpty(destination))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0181), nameof(destination));
-        }
+        ArgumentNullException.ThrowIfNull(claim);
+        ArgumentException.ThrowIfNullOrEmpty(destination);
 
         claim.Properties.TryGetValue(Properties.Destinations, out string? destinations);
 
@@ -573,12 +608,10 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="claim">The <see cref="Claim"/> instance.</param>
     /// <param name="destinations">The destinations.</param>
+    [OverloadResolutionPriority(0)]
     public static Claim SetDestinations(this Claim claim, ImmutableArray<string> destinations)
     {
-        if (claim is null)
-        {
-            throw new ArgumentNullException(nameof(claim));
-        }
+        ArgumentNullException.ThrowIfNull(claim);
 
         if (destinations.IsDefaultOrEmpty)
         {
@@ -587,7 +620,7 @@ public static class OpenIddictExtensions
             return claim;
         }
 
-        if (destinations.Any(destination => string.IsNullOrEmpty(destination)))
+        if (destinations.Any(string.IsNullOrEmpty))
         {
             throw new ArgumentException(SR.GetResourceString(SR.ID0182), nameof(destinations));
         }
@@ -619,37 +652,36 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="claim">The <see cref="Claim"/> instance.</param>
     /// <param name="destinations">The destinations.</param>
-    public static Claim SetDestinations(this Claim claim, IEnumerable<string>? destinations)
-        => claim.SetDestinations(destinations?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+    [OverloadResolutionPriority(-1)]
+    public static Claim SetDestinations(this Claim claim, params string[]? destinations)
+        => claim.SetDestinations([.. destinations ?? []]);
 
     /// <summary>
     /// Adds specific destinations to a claim.
     /// </summary>
     /// <param name="claim">The <see cref="Claim"/> instance.</param>
     /// <param name="destinations">The destinations.</param>
-    public static Claim SetDestinations(this Claim claim, params string[]? destinations)
-        => claim.SetDestinations(destinations?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+    [OverloadResolutionPriority(-2)]
+    public static Claim SetDestinations(this Claim claim, IEnumerable<string>? destinations)
+        => claim.SetDestinations([.. destinations ?? []]);
 
     /// <summary>
-    /// Gets the destinations associated with all the claims of the given principal.
+    /// Gets the destinations associated with all the claims of the given identity.
     /// </summary>
-    /// <param name="principal">The principal.</param>
+    /// <param name="identity">The identity.</param>
     /// <returns>The destinations, returned as a flattened dictionary.</returns>
-    public static ImmutableDictionary<string, string[]> GetDestinations(this ClaimsPrincipal principal)
+    public static ImmutableDictionary<string, ImmutableArray<string>> GetDestinations(this ClaimsIdentity identity)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
+        ArgumentNullException.ThrowIfNull(identity);
 
-        var builder = ImmutableDictionary.CreateBuilder<string, string[]>(StringComparer.Ordinal);
+        var builder = ImmutableDictionary.CreateBuilder<string, ImmutableArray<string>>(StringComparer.Ordinal);
 
-        foreach (var group in principal.Claims.GroupBy(claim => claim.Type))
+        foreach (var group in identity.Claims.GroupBy(claim => claim.Type, StringComparer.Ordinal))
         {
             var claims = group.ToList();
 
             var destinations = new HashSet<string>(claims[0].GetDestinations(), StringComparer.OrdinalIgnoreCase);
-            if (destinations.Count != 0)
+            if (destinations.Count is not 0)
             {
                 // Ensure the other claims of the same type use the same exact destinations.
                 for (var index = 0; index < claims.Count; index++)
@@ -660,11 +692,69 @@ public static class OpenIddictExtensions
                     }
                 }
 
-                builder.Add(group.Key, destinations.ToArray());
+                builder.Add(group.Key, [.. destinations]);
             }
         }
 
         return builder.ToImmutable();
+    }
+
+    /// <summary>
+    /// Gets the destinations associated with all the claims of the given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <returns>The destinations, returned as a flattened dictionary.</returns>
+    public static ImmutableDictionary<string, ImmutableArray<string>> GetDestinations(this ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+
+        var builder = ImmutableDictionary.CreateBuilder<string, ImmutableArray<string>>(StringComparer.Ordinal);
+
+        foreach (var group in principal.Claims.GroupBy(claim => claim.Type, StringComparer.Ordinal))
+        {
+            var claims = group.ToList();
+
+            var destinations = new HashSet<string>(claims[0].GetDestinations(), StringComparer.OrdinalIgnoreCase);
+            if (destinations.Count is not 0)
+            {
+                // Ensure the other claims of the same type use the same exact destinations.
+                for (var index = 0; index < claims.Count; index++)
+                {
+                    if (!destinations.SetEquals(claims[index].GetDestinations()))
+                    {
+                        throw new InvalidOperationException(SR.FormatID0183(group.Key));
+                    }
+                }
+
+                builder.Add(group.Key, [.. destinations]);
+            }
+        }
+
+        return builder.ToImmutable();
+    }
+
+    /// <summary>
+    /// Sets the destinations associated with all the claims of the given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="destinations">The destinations, as a flattened dictionary.</param>
+    /// <returns>The identity.</returns>
+    public static ClaimsIdentity SetDestinations(this ClaimsIdentity identity,
+        ImmutableDictionary<string, ImmutableArray<string>> destinations)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(destinations);
+
+        foreach (var destination in destinations)
+        {
+            foreach (var claim in identity.Claims.Where(claim =>
+                string.Equals(claim.Type, destination.Key, StringComparison.Ordinal)))
+            {
+                claim.SetDestinations(destination.Value);
+            }
+        }
+
+        return identity;
     }
 
     /// <summary>
@@ -673,24 +763,57 @@ public static class OpenIddictExtensions
     /// <param name="principal">The principal.</param>
     /// <param name="destinations">The destinations, as a flattened dictionary.</param>
     /// <returns>The principal.</returns>
-    public static ClaimsPrincipal SetDestinations(this ClaimsPrincipal principal, ImmutableDictionary<string, string[]> destinations)
+    public static ClaimsPrincipal SetDestinations(this ClaimsPrincipal principal,
+        ImmutableDictionary<string, ImmutableArray<string>> destinations)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (destinations is null)
-        {
-            throw new ArgumentNullException(nameof(destinations));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(destinations);
 
         foreach (var destination in destinations)
         {
-            foreach (var claim in principal.Claims.Where(claim => claim.Type == destination.Key))
+            foreach (var claim in principal.Claims.Where(claim =>
+                string.Equals(claim.Type, destination.Key, StringComparison.Ordinal)))
             {
                 claim.SetDestinations(destination.Value);
             }
+        }
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Sets the destinations associated with all the claims of the given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="selector">The destinations selector delegate.</param>
+    /// <returns>The identity.</returns>
+    public static ClaimsIdentity SetDestinations(this ClaimsIdentity identity, Func<Claim, IEnumerable<string>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        foreach (var claim in identity.Claims)
+        {
+            claim.SetDestinations(selector(claim));
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Sets the destinations associated with all the claims of the given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="selector">The destinations selector delegate.</param>
+    /// <returns>The principal.</returns>
+    public static ClaimsPrincipal SetDestinations(this ClaimsPrincipal principal, Func<Claim, IEnumerable<string>> selector)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(selector);
+
+        foreach (var claim in principal.Claims)
+        {
+            claim.SetDestinations(selector(claim));
         }
 
         return principal;
@@ -701,20 +824,13 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="identity">The <see cref="ClaimsIdentity"/> instance to filter.</param>
     /// <param name="filter">
-    /// The delegate filtering the claims: return <c>true</c>
-    /// to accept the claim, <c>false</c> to remove it.
+    /// The delegate filtering the claims: return <see langword="true"/>
+    /// to accept the claim, <see langword="false"/> to remove it.
     /// </param>
     public static ClaimsIdentity Clone(this ClaimsIdentity identity, Func<Claim, bool> filter)
     {
-        if (identity is null)
-        {
-            throw new ArgumentNullException(nameof(identity));
-        }
-
-        if (filter is null)
-        {
-            throw new ArgumentNullException(nameof(filter));
-        }
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(filter);
 
         var clone = identity.Clone();
 
@@ -741,20 +857,13 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="principal">The <see cref="ClaimsPrincipal"/> instance to filter.</param>
     /// <param name="filter">
-    /// The delegate filtering the claims: return <c>true</c>
-    /// to accept the claim, <c>false</c> to remove it.
+    /// The delegate filtering the claims: return <see langword="true"/>
+    /// to accept the claim, <see langword="false"/> to remove it.
     /// </param>
     public static ClaimsPrincipal Clone(this ClaimsPrincipal principal, Func<Claim, bool> filter)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (filter is null)
-        {
-            throw new ArgumentNullException(nameof(filter));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(filter);
 
         var clone = new ClaimsPrincipal();
 
@@ -773,125 +882,819 @@ public static class OpenIddictExtensions
     /// <param name="type">The type associated with the claim.</param>
     /// <param name="value">The value associated with the claim.</param>
     public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, string value)
-    {
-        if (identity is null)
-        {
-            throw new ArgumentNullException(nameof(identity));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
-
-        if (string.IsNullOrEmpty(value))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0185), nameof(value));
-        }
-
-        identity.AddClaim(new Claim(type, value));
-        return identity;
-    }
+        => identity.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
 
     /// <summary>
-    /// Adds a claim to a given identity and specify one or more destinations.
-    /// </summary>
-    /// <param name="identity">The identity.</param>
-    /// <param name="type">The type associated with the claim.</param>
-    /// <param name="value">The value associated with the claim.</param>
-    /// <param name="destinations">The destinations associated with the claim.</param>
-    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, string value, ImmutableArray<string> destinations)
-    {
-        if (identity is null)
-        {
-            throw new ArgumentNullException(nameof(identity));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
-
-        if (string.IsNullOrEmpty(value))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0185), nameof(value));
-        }
-
-        identity.AddClaim(new Claim(type, value).SetDestinations(destinations));
-        return identity;
-    }
-
-    /// <summary>
-    /// Adds a claim to a given identity and specify one or more destinations.
-    /// </summary>
-    /// <param name="identity">The identity.</param>
-    /// <param name="type">The type associated with the claim.</param>
-    /// <param name="value">The value associated with the claim.</param>
-    /// <param name="destinations">The destinations associated with the claim.</param>
-    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, string value, params string[]? destinations)
-        => identity.AddClaim(type, value, destinations?.ToImmutableArray() ?? ImmutableArray.Create<string>());
-
-    /// <summary>
-    /// Gets the claim value corresponding to the given type.
-    /// </summary>
-    /// <param name="identity">The identity.</param>
-    /// <param name="type">The type associated with the claim.</param>
-    /// <returns>The claim value.</returns>
-    public static string? GetClaim(this ClaimsIdentity identity, string type)
-    {
-        if (identity is null)
-        {
-            throw new ArgumentNullException(nameof(identity));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
-
-        return identity.FindFirst(type)?.Value;
-    }
-
-    /// <summary>
-    /// Gets the claim value corresponding to the given type.
+    /// Adds a claim to a given principal.
     /// </summary>
     /// <param name="principal">The principal.</param>
     /// <param name="type">The type associated with the claim.</param>
-    /// <returns>The claim value.</returns>
-    public static string? GetClaim(this ClaimsPrincipal principal, string type)
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, string value)
+        => principal.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, string value, string issuer)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
-
-        return principal.FindFirst(type)?.Value;
+        identity.AddClaim(new Claim(type, value, ClaimValueTypes.String, issuer, issuer, identity));
+        return identity;
     }
 
     /// <summary>
-    /// Gets the claim values corresponding to the given type.
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, string value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        identity.AddClaim(type, value, issuer);
+        return principal;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given identity.
     /// </summary>
     /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, bool value)
+        => identity.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, bool value)
+        => principal.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, bool value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.AddClaim(new Claim(type, value.ToString(), ClaimValueTypes.Boolean, issuer, issuer, identity));
+        return identity;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, bool value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        identity.AddClaim(type, value, issuer);
+        return principal;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, long value)
+        => identity.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, long value)
+        => principal.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, long value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.AddClaim(new Claim(type, value.ToString(CultureInfo.InvariantCulture),
+            ClaimValueTypes.Integer64, issuer, issuer, identity));
+        return identity;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, long value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        identity.AddClaim(type, value, issuer);
+        return principal;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, JsonElement value)
+        => identity.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, JsonElement value)
+        => principal.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, JsonElement value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (value.ValueKind is JsonValueKind.Array)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0185), nameof(value));
+        }
+
+        identity.AddClaim(new Claim(
+            type          : type,
+            value         : value.ToString(),
+            valueType     : GetClaimValueType(value),
+            issuer        : issuer,
+            originalIssuer: issuer,
+            subject       : identity));
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, JsonElement value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        identity.AddClaim(type, value, issuer);
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, JsonNode value)
+        => identity.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, JsonNode value)
+        => principal.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type, JsonNode value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        ArgumentNullException.ThrowIfNull(value);
+
+        if (value is JsonArray)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0185), nameof(value));
+        }
+
+        identity.AddClaim(new Claim(
+            type          : type,
+            value         : value switch
+            {
+                // If the item can be directly retrieved as a string, store it as-is.
+                JsonValue instance when instance.TryGetValue(out string? result) => result,
+
+                // Otherwise, serialize it as a JSON string.
+                JsonNode instance => instance.ToJsonString()
+            },
+            valueType     : GetClaimValueType(value),
+            issuer        : issuer,
+            originalIssuer: issuer,
+            subject       : identity));
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type, JsonNode value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        ArgumentNullException.ThrowIfNull(value);
+
+        identity.AddClaim(type, value, issuer);
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity,
+        string type, IDictionary<string, string?> value)
+        => identity.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal,
+        string type, IDictionary<string, string?> value)
+        => principal.AddClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds a claim to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsIdentity AddClaim(this ClaimsIdentity identity, string type,
+        IDictionary<string, string?> value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            Indented = false
+        });
+
+        writer.WriteStartObject();
+
+        foreach (var property in value)
+        {
+            writer.WritePropertyName(property.Key);
+            writer.WriteStringValue(property.Value);
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+
+        identity.AddClaim(new Claim(
+            type          : type,
+            value         : Encoding.UTF8.GetString(stream.ToArray()),
+            valueType     : "JSON",
+            issuer        : issuer,
+            originalIssuer: issuer,
+            subject       : identity));
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Adds a claim to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    public static ClaimsPrincipal AddClaim(this ClaimsPrincipal principal, string type,
+        IDictionary<string, string?> value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        identity.AddClaim(type, value, issuer);
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Adds claims to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="values">The values associated with the claims.</param>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsIdentity AddClaims(this ClaimsIdentity identity, string type, ImmutableArray<string> values)
+        => identity.AddClaims(type, values, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds claims to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="values">The values associated with the claims.</param>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsPrincipal AddClaims(this ClaimsPrincipal principal, string type, ImmutableArray<string> values)
+        => principal.AddClaims(type, values, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds claims to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="values">The values associated with the claims.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsIdentity AddClaims(this ClaimsIdentity identity, string type, ImmutableArray<string> values, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        var set = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var index = 0; index < values.Length; index++)
+        {
+            var item = values[index];
+            if (set.Add(item))
+            {
+                identity.AddClaim(new Claim(
+                    type          : type,
+                    value         : item,
+                    valueType     : ClaimValueTypes.String,
+                    issuer        : issuer,
+                    originalIssuer: issuer,
+                    subject       : identity));
+            }
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Adds claims to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="values">The values associated with the claims.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsPrincipal AddClaims(this ClaimsPrincipal principal,
+        string type, ImmutableArray<string> values, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        identity.AddClaims(type, values, issuer);
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Adds claims to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The value associated with the claims.</param>
+    public static ClaimsIdentity AddClaims(this ClaimsIdentity identity, string type, JsonElement value)
+        => identity.AddClaims(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds claims to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The value associated with the claims.</param>
+    public static ClaimsPrincipal AddClaims(this ClaimsPrincipal principal, string type, JsonElement value)
+        => principal.AddClaims(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds claims to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The value associated with the claims.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    public static ClaimsIdentity AddClaims(this ClaimsIdentity identity, string type, JsonElement value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (value.ValueKind is not JsonValueKind.Array)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0185), nameof(value));
+        }
+
+        var set = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var element in value.EnumerateArray())
+        {
+            var item = element.ToString();
+            if (set.Add(item))
+            {
+                identity.AddClaim(new Claim(
+                    type          : type,
+                    value         : item,
+                    valueType     : GetClaimValueType(element),
+                    issuer        : issuer,
+                    originalIssuer: issuer,
+                    subject       : identity));
+            }
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Adds claims to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The value associated with the claims.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    public static ClaimsPrincipal AddClaims(this ClaimsPrincipal principal, string type, JsonElement value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        if (value.ValueKind is not JsonValueKind.Array)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0185), nameof(value));
+        }
+
+        identity.AddClaims(type, value, issuer);
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Adds claims to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The value associated with the claims.</param>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsIdentity AddClaims(this ClaimsIdentity identity, string type, JsonArray value)
+        => identity.AddClaims(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds claims to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The value associated with the claims.</param>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsPrincipal AddClaims(this ClaimsPrincipal principal, string type, JsonArray value)
+        => principal.AddClaims(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Adds claims to a given identity.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The value associated with the claims.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsIdentity AddClaims(this ClaimsIdentity identity, string type, JsonArray value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        var set = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var node in value)
+        {
+            var item = node switch
+            {
+                // If the item is null, store it as an empty string.
+                null => string.Empty,
+
+                // If the item can be directly retrieved as a string, store it as-is.
+                JsonValue instance when instance.TryGetValue(out string? result) => result,
+
+                // Otherwise, serialize it as a JSON string.
+                JsonNode instance => instance.ToJsonString()
+            };
+
+            if (set.Add(item))
+            {
+                identity.AddClaim(new Claim(
+                    type          : type,
+                    value         : item,
+                    valueType     : GetClaimValueType(node),
+                    issuer        : issuer,
+                    originalIssuer: issuer,
+                    subject       : identity));
+            }
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Adds claims to a given principal.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The value associated with the claims.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsPrincipal AddClaims(this ClaimsPrincipal principal, string type, JsonArray value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        if (principal.Identity is not ClaimsIdentity identity)
+        {
+            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
+        }
+
+        identity.AddClaims(type, value, issuer);
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Gets the unique claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Multiple claims using the same <paramref name="type"/> are present in the identity.
+    /// </exception>
+    /// <returns>The claim value.</returns>
+    public static string? GetClaim(this ClaimsIdentity identity, string type)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        var claims = identity.FindAll(type);
+        if (claims is IList<Claim> list)
+        {
+            return list switch
+            {
+                [Claim claim] => claim.Value,
+                [           ] => null,
+                [     ..    ] => throw new InvalidOperationException(SR.GetResourceString(SR.ID0423))
+            };
+        }
+
+        else
+        {
+            using var enumerator = claims.GetEnumerator();
+            while (enumerator.MoveNext())
+            {
+                var claim = enumerator.Current;
+                if (!enumerator.MoveNext())
+                {
+                    return claim.Value;
+                }
+
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0423));
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets the unique claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Multiple claims using the same <paramref name="type"/> are present in the principal.
+    /// </exception>
+    /// <returns>The claim value.</returns>
+    public static string? GetClaim(this ClaimsPrincipal principal, string type)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        var claims = principal.FindAll(type);
+        if (claims is IList<Claim> list)
+        {
+            return list switch
+            {
+                [Claim claim] => claim.Value,
+                [           ] => null,
+                [     ..    ] => throw new InvalidOperationException(SR.GetResourceString(SR.ID0423))
+            };
+        }
+
+        else
+        {
+            using var enumerator = claims.GetEnumerator();
+            while (enumerator.MoveNext())
+            {
+                var claim = enumerator.Current;
+                if (!enumerator.MoveNext())
+                {
+                    return claim.Value;
+                }
+
+                throw new InvalidOperationException(SR.GetResourceString(SR.ID0423));
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets all the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
     /// <param name="type">The type associated with the claims.</param>
     /// <returns>The claim values.</returns>
     public static ImmutableArray<string> GetClaims(this ClaimsIdentity identity, string type)
     {
-        if (identity is null)
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        var builder = ImmutableArray.CreateBuilder<string>();
+
+        foreach (var claim in identity.FindAll(type))
         {
-            throw new ArgumentNullException(nameof(identity));
+            // If the claim uses the special JSON_ARRAY claim value type, parse it to extract its individual
+            // values. When the individual values are not strings, their string representation is returned.
+            if (claim.ValueType is "JSON_ARRAY")
+            {
+                using var document = JsonDocument.Parse(claim.Value);
+
+                if (document.RootElement.ValueKind is not JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var item in document.RootElement.EnumerateArray())
+                {
+                    var value = item.ToString();
+                    if (!builder.Contains(value))
+                    {
+                        builder.Add(value);
+                    }
+                }
+            }
+
+            else if (!builder.Contains(claim.Value))
+            {
+                builder.Add(claim.Value);
+            }
         }
 
-        if (string.IsNullOrEmpty(type))
+        return builder.ToImmutable();
+    }
+
+    /// <summary>
+    /// Gets all the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <returns>The claim values.</returns>
+    public static ImmutableArray<string> GetClaims(this ClaimsPrincipal principal, string type)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        var builder = ImmutableArray.CreateBuilder<string>();
+
+        foreach (var claim in principal.FindAll(type))
         {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
+            // If the claim uses the special JSON_ARRAY claim value type, parse it to extract its individual
+            // values. When the individual values are not strings, their string representation is returned.
+            if (claim.ValueType is "JSON_ARRAY")
+            {
+                using var document = JsonDocument.Parse(claim.Value);
+
+                if (document.RootElement.ValueKind is not JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                foreach (var item in document.RootElement.EnumerateArray())
+                {
+                    var value = item.ToString();
+                    if (!builder.Contains(value))
+                    {
+                        builder.Add(value);
+                    }
+                }
+            }
+
+            else if (!builder.Contains(claim.Value))
+            {
+                builder.Add(claim.Value);
+            }
         }
 
-        return identity.FindAll(type).Select(claim => claim.Value).Distinct(StringComparer.Ordinal).ToImmutableArray();
+        return builder.ToImmutable();
     }
 
     /// <summary>
@@ -899,41 +1702,13 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="identity">The claims identity.</param>
     /// <param name="type">The claim type.</param>
-    /// <returns><c>true</c> if the identity contains at least one claim of the specified type.</returns>
+    /// <returns><see langword="true"/> if the identity contains at least one claim of the specified type.</returns>
     public static bool HasClaim(this ClaimsIdentity identity, string type)
     {
-        if (identity is null)
-        {
-            throw new ArgumentNullException(nameof(identity));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         return identity.FindAll(type).Any();
-    }
-
-    /// <summary>
-    /// Gets the claim values corresponding to the given type.
-    /// </summary>
-    /// <param name="principal">The principal.</param>
-    /// <param name="type">The type associated with the claims.</param>
-    /// <returns>The claim values.</returns>
-    public static ImmutableArray<string> GetClaims(this ClaimsPrincipal principal, string type)
-    {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
-
-        return principal.FindAll(type).Select(claim => claim.Value).Distinct(StringComparer.Ordinal).ToImmutableArray();
     }
 
     /// <summary>
@@ -941,18 +1716,11 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <param name="type">The claim type.</param>
-    /// <returns><c>true</c> if the principal contains at least one claim of the specified type.</returns>
+    /// <returns><see langword="true"/> if the principal contains at least one claim of the specified type.</returns>
     public static bool HasClaim(this ClaimsPrincipal principal, string type)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         return principal.FindAll(type).Any();
     }
@@ -965,15 +1733,8 @@ public static class OpenIddictExtensions
     /// <returns>The claims identity.</returns>
     public static ClaimsIdentity RemoveClaims(this ClaimsIdentity identity, string type)
     {
-        if (identity is null)
-        {
-            throw new ArgumentNullException(nameof(identity));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         foreach (var claim in identity.FindAll(type).ToList())
         {
@@ -991,15 +1752,8 @@ public static class OpenIddictExtensions
     /// <returns>The claims identity.</returns>
     public static ClaimsPrincipal RemoveClaims(this ClaimsPrincipal principal, string type)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         foreach (var identity in principal.Identities)
         {
@@ -1016,26 +1770,40 @@ public static class OpenIddictExtensions
     /// Sets the claim value corresponding to the given type.
     /// </summary>
     /// <param name="identity">The identity.</param>
-    /// <param name="type">The type associated with the claims.</param>
-    /// <param name="value">The claim value.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
     /// <returns>The claims identity.</returns>
-    public static ClaimsIdentity SetClaims(this ClaimsIdentity identity, string type, string? value)
-    {
-        if (identity is null)
-        {
-            throw new ArgumentNullException(nameof(identity));
-        }
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, string? value)
+        => identity.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
 
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, string? value)
+        => principal.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, string? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         identity.RemoveClaims(type);
 
         if (!string.IsNullOrEmpty(value))
         {
-            identity.AddClaim(type, value);
+            identity.AddClaim(type, value, issuer);
         }
 
         return identity;
@@ -1045,31 +1813,354 @@ public static class OpenIddictExtensions
     /// Sets the claim value corresponding to the given type.
     /// </summary>
     /// <param name="principal">The principal.</param>
-    /// <param name="type">The type associated with the claims.</param>
-    /// <param name="value">The claim value.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
     /// <returns>The claims identity.</returns>
-    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, string? value)
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, string? value, string issuer)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (principal.Identity is not ClaimsIdentity identity)
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         principal.RemoveClaims(type);
 
         if (!string.IsNullOrEmpty(value))
         {
-            identity.AddClaim(type, value);
+            principal.AddClaim(type, value, issuer);
+        }
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, bool? value)
+        => identity.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, bool? value)
+        => principal.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, bool? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.RemoveClaims(type);
+
+        if (value is not null)
+        {
+            identity.AddClaim(type, value.GetValueOrDefault(), issuer);
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, bool? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        principal.RemoveClaims(type);
+
+        if (value is not null)
+        {
+            principal.AddClaim(type, value.GetValueOrDefault(), issuer);
+        }
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, long? value)
+        => identity.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, long? value)
+        => principal.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, long? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.RemoveClaims(type);
+
+        if (value is not null)
+        {
+            identity.AddClaim(type, value.GetValueOrDefault(), issuer);
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, long? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        principal.RemoveClaims(type);
+
+        if (value is not null)
+        {
+            principal.AddClaim(type, value.GetValueOrDefault(), issuer);
+        }
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, JsonElement value)
+        => identity.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, JsonElement value)
+        => principal.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, JsonElement value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.RemoveClaims(type);
+
+        if (!OpenIddictHelpers.IsNullOrEmpty(value))
+        {
+            identity.AddClaim(type, value, issuer);
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, JsonElement value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        principal.RemoveClaims(type);
+
+        if (!OpenIddictHelpers.IsNullOrEmpty(value))
+        {
+            principal.AddClaim(type, value, issuer);
+        }
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, JsonNode? value)
+        => identity.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, JsonNode? value)
+        => principal.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type, JsonNode? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.RemoveClaims(type);
+
+        if (!OpenIddictHelpers.IsNullOrEmpty(value))
+        {
+            identity.AddClaim(type, value, issuer);
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type, JsonNode? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        principal.RemoveClaims(type);
+
+        if (!OpenIddictHelpers.IsNullOrEmpty(value))
+        {
+            principal.AddClaim(type, value, issuer);
+        }
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity,
+        string type, IDictionary<string, string?>? value)
+        => identity.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal,
+        string type, IDictionary<string, string?>? value)
+        => principal.SetClaim(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaim(this ClaimsIdentity identity, string type,
+        IDictionary<string, string?>? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.RemoveClaims(type);
+
+        if (value is { Count: > 0 })
+        {
+            identity.AddClaim(type, value, issuer);
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claim.</param>
+    /// <param name="value">The value associated with the claim.</param>
+    /// <param name="issuer">The issuer associated with the claim.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaim(this ClaimsPrincipal principal, string type,
+        IDictionary<string, string?>? value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        principal.RemoveClaims(type);
+
+        if (value is { Count: > 0 })
+        {
+            principal.AddClaim(type, value, issuer);
         }
 
         return principal;
@@ -1080,25 +2171,43 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="identity">The identity.</param>
     /// <param name="type">The type associated with the claims.</param>
-    /// <param name="values">The claim values.</param>
+    /// <param name="values">The values associated with the claims.</param>
     /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(0)]
     public static ClaimsIdentity SetClaims(this ClaimsIdentity identity, string type, ImmutableArray<string> values)
-    {
-        if (identity is null)
-        {
-            throw new ArgumentNullException(nameof(identity));
-        }
+        => identity.SetClaims(type, values, ClaimsIdentity.DefaultIssuer);
 
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
+    /// <summary>
+    /// Sets the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="values">The values associated with the claims.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsPrincipal SetClaims(this ClaimsPrincipal principal, string type, ImmutableArray<string> values)
+        => principal.SetClaims(type, values, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="values">The values associated with the claims.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsIdentity SetClaims(this ClaimsIdentity identity,
+        string type, ImmutableArray<string> values, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         identity.RemoveClaims(type);
 
         foreach (var value in values.Distinct(StringComparer.Ordinal))
         {
-            identity.AddClaim(type, value);
+            identity.AddClaim(type, value, issuer);
         }
 
         return identity;
@@ -1109,48 +2218,220 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="principal">The principal.</param>
     /// <param name="type">The type associated with the claims.</param>
-    /// <param name="values">The claim values.</param>
+    /// <param name="values">The values associated with the claims.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
     /// <returns>The claims identity.</returns>
-    public static ClaimsPrincipal SetClaims(this ClaimsPrincipal principal, string type, ImmutableArray<string> values)
+    [OverloadResolutionPriority(0)]
+    public static ClaimsPrincipal SetClaims(this ClaimsPrincipal principal,
+        string type, ImmutableArray<string> values, string issuer)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (principal.Identity is not ClaimsIdentity identity)
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0286), nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0184), nameof(type));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         principal.RemoveClaims(type);
 
         foreach (var value in values.Distinct(StringComparer.Ordinal))
         {
-            identity.AddClaim(type, value);
+            principal.AddClaim(type, value, issuer);
         }
 
         return principal;
     }
 
     /// <summary>
+    /// Sets the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The JSON array from which claim values are extracted.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaims(this ClaimsIdentity identity, string type, JsonElement value)
+        => identity.SetClaims(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The JSON array from which claim values are extracted.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaims(this ClaimsPrincipal principal, string type, JsonElement value)
+        => principal.SetClaims(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The JSON array from which claim values are extracted.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetClaims(this ClaimsIdentity identity, string type, JsonElement value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.RemoveClaims(type);
+
+        if (!OpenIddictHelpers.IsNullOrEmpty(value))
+        {
+            identity.AddClaims(type, value, issuer);
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The JSON array from which claim values are extracted.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsPrincipal SetClaims(this ClaimsPrincipal principal, string type, JsonElement value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        principal.RemoveClaims(type);
+
+        if (!OpenIddictHelpers.IsNullOrEmpty(value))
+        {
+            principal.AddClaims(type, value, issuer);
+        }
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Sets the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The JSON array from which claim values are extracted.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsIdentity SetClaims(this ClaimsIdentity identity, string type, JsonArray value)
+        => identity.SetClaims(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The JSON array from which claim values are extracted.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsPrincipal SetClaims(this ClaimsPrincipal principal, string type, JsonArray value)
+        => principal.SetClaims(type, value, ClaimsIdentity.DefaultIssuer);
+
+    /// <summary>
+    /// Sets the claim values corresponding to the given type.
+    /// </summary>
+    /// <param name="identity">The identity.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The JSON array from which claim values are extracted.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsIdentity SetClaims(this ClaimsIdentity identity, string type, JsonArray value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        identity.RemoveClaims(type);
+
+        if (value.Count is not 0)
+        {
+            identity.AddClaims(type, value, issuer);
+        }
+
+        return identity;
+    }
+
+    /// <summary>
+    /// Sets the claim value corresponding to the given type.
+    /// </summary>
+    /// <param name="principal">The principal.</param>
+    /// <param name="type">The type associated with the claims.</param>
+    /// <param name="value">The JSON array from which claim values are extracted.</param>
+    /// <param name="issuer">The issuer associated with the claims.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsPrincipal SetClaims(this ClaimsPrincipal principal, string type, JsonArray value, string issuer)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        principal.RemoveClaims(type);
+
+        if (value.Count is not 0)
+        {
+            principal.AddClaims(type, value, issuer);
+        }
+
+        return principal;
+    }
+
+    /// <summary>
+    /// Gets the creation date stored in the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The creation date or <see langword="null"/> if the claim cannot be found.</returns>
+    public static DateTimeOffset? GetCreationDate(this ClaimsIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        var claim = identity.FindFirst(Claims.Private.CreationDate);
+        if (claim is null)
+        {
+            return null;
+        }
+
+        if (!DateTimeOffset.TryParseExact(claim.Value, "r", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value))
+        {
+            return null;
+        }
+
+        return value;
+    }
+
+    /// <summary>
     /// Gets the creation date stored in the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The creation date or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The creation date or <see langword="null"/> if the claim cannot be found.</returns>
     public static DateTimeOffset? GetCreationDate(this ClaimsPrincipal principal)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
 
         var claim = principal.FindFirst(Claims.Private.CreationDate);
+        if (claim is null)
+        {
+            return null;
+        }
+
+        if (!DateTimeOffset.TryParseExact(claim.Value, "r", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value))
+        {
+            return null;
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// Gets the expiration date stored in the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The expiration date or <see langword="null"/> if the claim cannot be found.</returns>
+    public static DateTimeOffset? GetExpirationDate(this ClaimsIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        var claim = identity.FindFirst(Claims.Private.ExpirationDate);
         if (claim is null)
         {
             return null;
@@ -1168,13 +2449,10 @@ public static class OpenIddictExtensions
     /// Gets the expiration date stored in the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The expiration date or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The expiration date or <see langword="null"/> if the claim cannot be found.</returns>
     public static DateTimeOffset? GetExpirationDate(this ClaimsPrincipal principal)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
 
         var claim = principal.FindFirst(Claims.Private.ExpirationDate);
         if (claim is null)
@@ -1191,12 +2469,28 @@ public static class OpenIddictExtensions
     }
 
     /// <summary>
+    /// Gets the audiences list stored in the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The audiences list or an empty set if the claims cannot be found.</returns>
+    public static ImmutableArray<string> GetAudiences(this ClaimsIdentity identity)
+        => identity.GetClaims(Claims.Private.Audience);
+
+    /// <summary>
     /// Gets the audiences list stored in the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <returns>The audiences list or an empty set if the claims cannot be found.</returns>
     public static ImmutableArray<string> GetAudiences(this ClaimsPrincipal principal)
         => principal.GetClaims(Claims.Private.Audience);
+
+    /// <summary>
+    /// Gets the presenters list stored in the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The presenters list or an empty set if the claims cannot be found.</returns>
+    public static ImmutableArray<string> GetPresenters(this ClaimsIdentity identity)
+        => identity.GetClaims(Claims.Private.Presenter);
 
     /// <summary>
     /// Gets the presenters list stored in the claims principal.
@@ -1207,12 +2501,28 @@ public static class OpenIddictExtensions
         => principal.GetClaims(Claims.Private.Presenter);
 
     /// <summary>
+    /// Gets the resources list stored in the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The resources list or an empty set if the claims cannot be found.</returns>
+    public static ImmutableArray<string> GetResources(this ClaimsIdentity identity)
+        => identity.GetClaims(Claims.Private.Resource);
+
+    /// <summary>
     /// Gets the resources list stored in the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <returns>The resources list or an empty set if the claims cannot be found.</returns>
     public static ImmutableArray<string> GetResources(this ClaimsPrincipal principal)
         => principal.GetClaims(Claims.Private.Resource);
+
+    /// <summary>
+    /// Gets the scopes list stored in the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The scopes list or an empty set if the claim cannot be found.</returns>
+    public static ImmutableArray<string> GetScopes(this ClaimsIdentity identity)
+        => identity.GetClaims(Claims.Private.Scope);
 
     /// <summary>
     /// Gets the scopes list stored in the claims principal.
@@ -1223,96 +2533,253 @@ public static class OpenIddictExtensions
         => principal.GetClaims(Claims.Private.Scope);
 
     /// <summary>
+    /// Gets the access token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The access token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetAccessTokenLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.AccessTokenLifetime);
+
+    /// <summary>
     /// Gets the access token lifetime associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The access token lifetime or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The access token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
     public static TimeSpan? GetAccessTokenLifetime(this ClaimsPrincipal principal)
         => GetLifetime(principal, Claims.Private.AccessTokenLifetime);
+
+    /// <summary>
+    /// Gets the authorization code lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The authorization code lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetAuthorizationCodeLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.AuthorizationCodeLifetime);
 
     /// <summary>
     /// Gets the authorization code lifetime associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The authorization code lifetime or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The authorization code lifetime or <see langword="null"/> if the claim cannot be found.</returns>
     public static TimeSpan? GetAuthorizationCodeLifetime(this ClaimsPrincipal principal)
         => GetLifetime(principal, Claims.Private.AuthorizationCodeLifetime);
+
+    /// <summary>
+    /// Gets the device code lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The device code lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetDeviceCodeLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.DeviceCodeLifetime);
 
     /// <summary>
     /// Gets the device code lifetime associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The device code lifetime or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The device code lifetime or <see langword="null"/> if the claim cannot be found.</returns>
     public static TimeSpan? GetDeviceCodeLifetime(this ClaimsPrincipal principal)
         => GetLifetime(principal, Claims.Private.DeviceCodeLifetime);
+
+    /// <summary>
+    /// Gets the identity token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The identity token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetIdentityTokenLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.IdentityTokenLifetime);
 
     /// <summary>
     /// Gets the identity token lifetime associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The identity token lifetime or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The identity token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
     public static TimeSpan? GetIdentityTokenLifetime(this ClaimsPrincipal principal)
         => GetLifetime(principal, Claims.Private.IdentityTokenLifetime);
+
+    /// <summary>
+    /// Gets the issued token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The issued token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetIssuedTokenLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.IssuedTokenLifetime);
+
+    /// <summary>
+    /// Gets the issued token lifetime associated with the claims principal.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <returns>The issued token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetIssuedTokenLifetime(this ClaimsPrincipal principal)
+        => GetLifetime(principal, Claims.Private.IssuedTokenLifetime);
+
+    /// <summary>
+    /// Gets the request token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The request token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetRequestTokenLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.RequestTokenLifetime);
+
+    /// <summary>
+    /// Gets the request token lifetime associated with the claims principal.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <returns>The request token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetRequestTokenLifetime(this ClaimsPrincipal principal)
+        => GetLifetime(principal, Claims.Private.RequestTokenLifetime);
+
+    /// <summary>
+    /// Gets the refresh token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The refresh token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetRefreshTokenLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.RefreshTokenLifetime);
 
     /// <summary>
     /// Gets the refresh token lifetime associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The refresh token lifetime or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The refresh token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
     public static TimeSpan? GetRefreshTokenLifetime(this ClaimsPrincipal principal)
         => GetLifetime(principal, Claims.Private.RefreshTokenLifetime);
+
+    /// <summary>
+    /// Gets the state token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The state token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetStateTokenLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.StateTokenLifetime);
+
+    /// <summary>
+    /// Gets the state token lifetime associated with the claims principal.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <returns>The state token lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetStateTokenLifetime(this ClaimsPrincipal principal)
+        => GetLifetime(principal, Claims.Private.StateTokenLifetime);
+
+    /// <summary>
+    /// Gets the user code lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The user code lifetime or <see langword="null"/> if the claim cannot be found.</returns>
+    public static TimeSpan? GetUserCodeLifetime(this ClaimsIdentity identity)
+        => GetLifetime(identity, Claims.Private.UserCodeLifetime);
 
     /// <summary>
     /// Gets the user code lifetime associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The user code lifetime or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The user code lifetime or <see langword="null"/> if the claim cannot be found.</returns>
     public static TimeSpan? GetUserCodeLifetime(this ClaimsPrincipal principal)
         => GetLifetime(principal, Claims.Private.UserCodeLifetime);
+
+    /// <summary>
+    /// Gets the internal authorization identifier associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The unique identifier or <see langword="null"/> if the claim cannot be found.</returns>
+    public static string? GetAuthorizationId(this ClaimsIdentity identity)
+        => identity.GetClaim(Claims.Private.AuthorizationId);
 
     /// <summary>
     /// Gets the internal authorization identifier associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The unique identifier or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The unique identifier or <see langword="null"/> if the claim cannot be found.</returns>
     public static string? GetAuthorizationId(this ClaimsPrincipal principal)
         => principal.GetClaim(Claims.Private.AuthorizationId);
+
+    /// <summary>
+    /// Gets the internal session identifier associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The unique identifier or <see langword="null"/> if the claim cannot be found.</returns>
+    public static string? GetSessionId(this ClaimsIdentity identity)
+        => identity.GetClaim(Claims.Private.SessionId);
+
+    /// <summary>
+    /// Gets the internal session identifier associated with the claims principal.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <returns>The unique identifier or <see langword="null"/> if the claim cannot be found.</returns>
+    public static string? GetSessionId(this ClaimsPrincipal principal)
+        => principal.GetClaim(Claims.Private.SessionId);
+
+    /// <summary>
+    /// Gets the internal token identifier associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The unique identifier or <see langword="null"/> if the claim cannot be found.</returns>
+    public static string? GetTokenId(this ClaimsIdentity identity)
+        => identity.GetClaim(Claims.Private.TokenId);
 
     /// <summary>
     /// Gets the internal token identifier associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The unique identifier or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The unique identifier or <see langword="null"/> if the claim cannot be found.</returns>
     public static string? GetTokenId(this ClaimsPrincipal principal)
         => principal.GetClaim(Claims.Private.TokenId);
+
+    /// <summary>
+    /// Gets the token type associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <returns>The token type or <see langword="null"/> if the claim cannot be found.</returns>
+    public static string? GetTokenType(this ClaimsIdentity identity)
+        => identity.GetClaim(Claims.Private.TokenType);
 
     /// <summary>
     /// Gets the token type associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
-    /// <returns>The token type or <c>null</c> if the claim cannot be found.</returns>
+    /// <returns>The token type or <see langword="null"/> if the claim cannot be found.</returns>
     public static string? GetTokenType(this ClaimsPrincipal principal)
         => principal.GetClaim(Claims.Private.TokenType);
+
+    /// <summary>
+    /// Determines whether the claims identity contains the given audience.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="audience">The audience.</param>
+    /// <returns><see langword="true"/> if the identity contains the given audience.</returns>
+    public static bool HasAudience(this ClaimsIdentity identity, string audience)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(audience);
+
+        return identity.HasClaim(Claims.Private.Audience, audience);
+    }
 
     /// <summary>
     /// Determines whether the claims principal contains the given audience.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <param name="audience">The audience.</param>
-    /// <returns><c>true</c> if the principal contains the given audience.</returns>
+    /// <returns><see langword="true"/> if the principal contains the given audience.</returns>
     public static bool HasAudience(this ClaimsPrincipal principal, string audience)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(audience))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0186), nameof(audience));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(audience);
 
         return principal.HasClaim(Claims.Private.Audience, audience);
+    }
+
+    /// <summary>
+    /// Determines whether the claims identity contains the given presenter.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="presenter">The presenter.</param>
+    /// <returns><see langword="true"/> if the identity contains the given presenter.</returns>
+    public static bool HasPresenter(this ClaimsIdentity identity, string presenter)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(presenter);
+
+        return identity.HasClaim(Claims.Private.Presenter, presenter);
     }
 
     /// <summary>
@@ -1320,20 +2787,27 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <param name="presenter">The presenter.</param>
-    /// <returns><c>true</c> if the principal contains the given presenter.</returns>
+    /// <returns><see langword="true"/> if the principal contains the given presenter.</returns>
     public static bool HasPresenter(this ClaimsPrincipal principal, string presenter)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(presenter))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0187), nameof(presenter));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(presenter);
 
         return principal.HasClaim(Claims.Private.Presenter, presenter);
+    }
+
+    /// <summary>
+    /// Determines whether the claims identity contains the given resource.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="resource">The resource.</param>
+    /// <returns><see langword="true"/> if the identity contains the given resource.</returns>
+    public static bool HasResource(this ClaimsIdentity identity, string resource)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(resource);
+
+        return identity.HasClaim(Claims.Private.Resource, resource);
     }
 
     /// <summary>
@@ -1341,20 +2815,27 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <param name="resource">The resource.</param>
-    /// <returns><c>true</c> if the principal contains the given resource.</returns>
+    /// <returns><see langword="true"/> if the principal contains the given resource.</returns>
     public static bool HasResource(this ClaimsPrincipal principal, string resource)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(resource))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0062), nameof(resource));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(resource);
 
         return principal.HasClaim(Claims.Private.Resource, resource);
+    }
+
+    /// <summary>
+    /// Determines whether the claims identity contains the given scope.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="scope">The scope.</param>
+    /// <returns><see langword="true"/> if the identity contains the given scope.</returns>
+    public static bool HasScope(this ClaimsIdentity identity, string scope)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(scope);
+
+        return identity.HasClaim(Claims.Private.Scope, scope);
     }
 
     /// <summary>
@@ -1362,20 +2843,27 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <param name="scope">The scope.</param>
-    /// <returns><c>true</c> if the principal contains the given scope.</returns>
+    /// <returns><see langword="true"/> if the principal contains the given scope.</returns>
     public static bool HasScope(this ClaimsPrincipal principal, string scope)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(scope))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0180), nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(scope);
 
         return principal.HasClaim(Claims.Private.Scope, scope);
+    }
+
+    /// <summary>
+    /// Determines whether the token type associated with the claims identity matches the specified type.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="type">The token type.</param>
+    /// <returns><see langword="true"/> if the token type matches the specified type.</returns>
+    public static bool HasTokenType(this ClaimsIdentity identity, string type)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentException.ThrowIfNullOrEmpty(type);
+
+        return string.Equals(identity.GetTokenType(), type, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1383,21 +2871,23 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <param name="type">The token type.</param>
-    /// <returns><c>true</c> if the token type matches the specified type.</returns>
+    /// <returns><see langword="true"/> if the token type matches the specified type.</returns>
     public static bool HasTokenType(this ClaimsPrincipal principal, string type)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0188), nameof(type));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
         return string.Equals(principal.GetTokenType(), type, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Sets the creation date in the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="date">The creation date</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetCreationDate(this ClaimsIdentity identity, DateTimeOffset? date)
+        => identity.SetClaim(Claims.Private.CreationDate, date?.ToString("r", CultureInfo.InvariantCulture));
 
     /// <summary>
     /// Sets the creation date in the claims principal.
@@ -1409,6 +2899,15 @@ public static class OpenIddictExtensions
         => principal.SetClaim(Claims.Private.CreationDate, date?.ToString("r", CultureInfo.InvariantCulture));
 
     /// <summary>
+    /// Sets the expiration date in the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="date">The expiration date</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetExpirationDate(this ClaimsIdentity identity, DateTimeOffset? date)
+        => identity.SetClaim(Claims.Private.ExpirationDate, date?.ToString("r", CultureInfo.InvariantCulture));
+
+    /// <summary>
     /// Sets the expiration date in the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
@@ -1418,24 +2917,37 @@ public static class OpenIddictExtensions
         => principal.SetClaim(Claims.Private.ExpirationDate, date?.ToString("r", CultureInfo.InvariantCulture));
 
     /// <summary>
+    /// Sets the audiences list in the claims identity.
+    /// Note: this method automatically excludes duplicate audiences.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="audiences">The audiences to store.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsIdentity SetAudiences(this ClaimsIdentity identity, ImmutableArray<string> audiences)
+        => identity.SetClaims(Claims.Private.Audience, audiences);
+
+    /// <summary>
     /// Sets the audiences list in the claims principal.
     /// Note: this method automatically excludes duplicate audiences.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
     /// <param name="audiences">The audiences to store.</param>
     /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(0)]
     public static ClaimsPrincipal SetAudiences(this ClaimsPrincipal principal, ImmutableArray<string> audiences)
         => principal.SetClaims(Claims.Private.Audience, audiences);
 
     /// <summary>
-    /// Sets the audiences list in the claims principal.
+    /// Sets the audiences list in the claims identity.
     /// Note: this method automatically excludes duplicate audiences.
     /// </summary>
-    /// <param name="principal">The claims principal.</param>
+    /// <param name="identity">The claims identity.</param>
     /// <param name="audiences">The audiences to store.</param>
-    /// <returns>The claims principal.</returns>
-    public static ClaimsPrincipal SetAudiences(this ClaimsPrincipal principal, IEnumerable<string>? audiences)
-        => principal.SetAudiences(audiences?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsIdentity SetAudiences(this ClaimsIdentity identity, params string[]? audiences)
+        => identity.SetAudiences([.. audiences ?? []]);
 
     /// <summary>
     /// Sets the audiences list in the claims principal.
@@ -1444,8 +2956,42 @@ public static class OpenIddictExtensions
     /// <param name="principal">The claims principal.</param>
     /// <param name="audiences">The audiences to store.</param>
     /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(-1)]
     public static ClaimsPrincipal SetAudiences(this ClaimsPrincipal principal, params string[]? audiences)
-        => principal.SetAudiences(audiences?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+        => principal.SetAudiences([.. audiences ?? []]);
+
+    /// <summary>
+    /// Sets the audiences list in the claims identity.
+    /// Note: this method automatically excludes duplicate audiences.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="audiences">The audiences to store.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-2)]
+    public static ClaimsIdentity SetAudiences(this ClaimsIdentity identity, IEnumerable<string>? audiences)
+        => identity.SetAudiences([.. audiences ?? []]);
+
+    /// <summary>
+    /// Sets the audiences list in the claims principal.
+    /// Note: this method automatically excludes duplicate audiences.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="audiences">The audiences to store.</param>
+    /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(-2)]
+    public static ClaimsPrincipal SetAudiences(this ClaimsPrincipal principal, IEnumerable<string>? audiences)
+        => principal.SetAudiences([.. audiences ?? []]);
+
+    /// <summary>
+    /// Sets the presenters list in the claims identity.
+    /// Note: this method automatically excludes duplicate presenters.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="presenters">The presenters to store.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsIdentity SetPresenters(this ClaimsIdentity identity, ImmutableArray<string> presenters)
+        => identity.SetClaims(Claims.Private.Presenter, presenters);
 
     /// <summary>
     /// Sets the presenters list in the claims principal.
@@ -1454,18 +3000,20 @@ public static class OpenIddictExtensions
     /// <param name="principal">The claims principal.</param>
     /// <param name="presenters">The presenters to store.</param>
     /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(0)]
     public static ClaimsPrincipal SetPresenters(this ClaimsPrincipal principal, ImmutableArray<string> presenters)
         => principal.SetClaims(Claims.Private.Presenter, presenters);
 
     /// <summary>
-    /// Sets the presenters list in the claims principal.
+    /// Sets the presenters list in the claims identity.
     /// Note: this method automatically excludes duplicate presenters.
     /// </summary>
-    /// <param name="principal">The claims principal.</param>
+    /// <param name="identity">The claims identity.</param>
     /// <param name="presenters">The presenters to store.</param>
-    /// <returns>The claims principal.</returns>
-    public static ClaimsPrincipal SetPresenters(this ClaimsPrincipal principal, IEnumerable<string>? presenters)
-        => principal.SetPresenters(presenters?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsIdentity SetPresenters(this ClaimsIdentity identity, params string[]? presenters)
+        => identity.SetPresenters([.. presenters ?? []]);
 
     /// <summary>
     /// Sets the presenters list in the claims principal.
@@ -1474,8 +3022,42 @@ public static class OpenIddictExtensions
     /// <param name="principal">The claims principal.</param>
     /// <param name="presenters">The presenters to store.</param>
     /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(-1)]
     public static ClaimsPrincipal SetPresenters(this ClaimsPrincipal principal, params string[]? presenters)
-        => principal.SetPresenters(presenters?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+        => principal.SetPresenters([.. presenters ?? []]);
+
+    /// <summary>
+    /// Sets the presenters list in the claims identity.
+    /// Note: this method automatically excludes duplicate presenters.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="presenters">The presenters to store.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-2)]
+    public static ClaimsIdentity SetPresenters(this ClaimsIdentity identity, IEnumerable<string>? presenters)
+        => identity.SetPresenters([.. presenters ?? []]);
+
+    /// <summary>
+    /// Sets the presenters list in the claims principal.
+    /// Note: this method automatically excludes duplicate presenters.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="presenters">The presenters to store.</param>
+    /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(-2)]
+    public static ClaimsPrincipal SetPresenters(this ClaimsPrincipal principal, IEnumerable<string>? presenters)
+        => principal.SetPresenters([.. presenters ?? []]);
+
+    /// <summary>
+    /// Sets the resources list in the claims identity.
+    /// Note: this method automatically excludes duplicate resources.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="resources">The resources to store.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsIdentity SetResources(this ClaimsIdentity identity, ImmutableArray<string> resources)
+        => identity.SetClaims(Claims.Private.Resource, resources);
 
     /// <summary>
     /// Sets the resources list in the claims principal.
@@ -1484,18 +3066,20 @@ public static class OpenIddictExtensions
     /// <param name="principal">The claims principal.</param>
     /// <param name="resources">The resources to store.</param>
     /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(0)]
     public static ClaimsPrincipal SetResources(this ClaimsPrincipal principal, ImmutableArray<string> resources)
         => principal.SetClaims(Claims.Private.Resource, resources);
 
     /// <summary>
-    /// Sets the resources list in the claims principal.
+    /// Sets the resources list in the claims identity.
     /// Note: this method automatically excludes duplicate resources.
     /// </summary>
-    /// <param name="principal">The claims principal.</param>
+    /// <param name="identity">The claims identity.</param>
     /// <param name="resources">The resources to store.</param>
-    /// <returns>The claims principal.</returns>
-    public static ClaimsPrincipal SetResources(this ClaimsPrincipal principal, IEnumerable<string>? resources)
-        => principal.SetResources(resources?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsIdentity SetResources(this ClaimsIdentity identity, params string[]? resources)
+        => identity.SetResources([.. resources ?? []]);
 
     /// <summary>
     /// Sets the resources list in the claims principal.
@@ -1504,8 +3088,42 @@ public static class OpenIddictExtensions
     /// <param name="principal">The claims principal.</param>
     /// <param name="resources">The resources to store.</param>
     /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(-1)]
     public static ClaimsPrincipal SetResources(this ClaimsPrincipal principal, params string[]? resources)
-        => principal.SetResources(resources?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+        => principal.SetResources([.. resources ?? []]);
+
+    /// <summary>
+    /// Sets the resources list in the claims identity.
+    /// Note: this method automatically excludes duplicate resources.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="resources">The resources to store.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-2)]
+    public static ClaimsIdentity SetResources(this ClaimsIdentity identity, IEnumerable<string>? resources)
+        => identity.SetResources([.. resources ?? []]);
+
+    /// <summary>
+    /// Sets the resources list in the claims principal.
+    /// Note: this method automatically excludes duplicate resources.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="resources">The resources to store.</param>
+    /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(-2)]
+    public static ClaimsPrincipal SetResources(this ClaimsPrincipal principal, IEnumerable<string>? resources)
+        => principal.SetResources([.. resources ?? []]);
+
+    /// <summary>
+    /// Sets the scopes list in the claims identity.
+    /// Note: this method automatically excludes duplicate scopes.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="scopes">The scopes to store.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(0)]
+    public static ClaimsIdentity SetScopes(this ClaimsIdentity identity, ImmutableArray<string> scopes)
+        => identity.SetClaims(Claims.Private.Scope, scopes);
 
     /// <summary>
     /// Sets the scopes list in the claims principal.
@@ -1514,18 +3132,20 @@ public static class OpenIddictExtensions
     /// <param name="principal">The claims principal.</param>
     /// <param name="scopes">The scopes to store.</param>
     /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(0)]
     public static ClaimsPrincipal SetScopes(this ClaimsPrincipal principal, ImmutableArray<string> scopes)
         => principal.SetClaims(Claims.Private.Scope, scopes);
 
     /// <summary>
-    /// Sets the scopes list in the claims principal.
+    /// Sets the scopes list in the claims identity.
     /// Note: this method automatically excludes duplicate scopes.
     /// </summary>
-    /// <param name="principal">The claims principal.</param>
+    /// <param name="identity">The claims identity.</param>
     /// <param name="scopes">The scopes to store.</param>
-    /// <returns>The claims principal.</returns>
-    public static ClaimsPrincipal SetScopes(this ClaimsPrincipal principal, IEnumerable<string>? scopes)
-        => principal.SetScopes(scopes?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-1)]
+    public static ClaimsIdentity SetScopes(this ClaimsIdentity identity, params string[]? scopes)
+        => identity.SetScopes([.. scopes ?? []]);
 
     /// <summary>
     /// Sets the scopes list in the claims principal.
@@ -1534,8 +3154,40 @@ public static class OpenIddictExtensions
     /// <param name="principal">The claims principal.</param>
     /// <param name="scopes">The scopes to store.</param>
     /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(-1)]
     public static ClaimsPrincipal SetScopes(this ClaimsPrincipal principal, params string[]? scopes)
-        => principal.SetScopes(scopes?.ToImmutableArray() ?? ImmutableArray.Create<string>());
+        => principal.SetScopes([.. scopes ?? []]);
+
+    /// <summary>
+    /// Sets the scopes list in the claims identity.
+    /// Note: this method automatically excludes duplicate scopes.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="scopes">The scopes to store.</param>
+    /// <returns>The claims identity.</returns>
+    [OverloadResolutionPriority(-2)]
+    public static ClaimsIdentity SetScopes(this ClaimsIdentity identity, IEnumerable<string>? scopes)
+        => identity.SetScopes([.. scopes ?? []]);
+
+    /// <summary>
+    /// Sets the scopes list in the claims principal.
+    /// Note: this method automatically excludes duplicate scopes.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="scopes">The scopes to store.</param>
+    /// <returns>The claims principal.</returns>
+    [OverloadResolutionPriority(-2)]
+    public static ClaimsPrincipal SetScopes(this ClaimsPrincipal principal, IEnumerable<string>? scopes)
+        => principal.SetScopes([.. scopes ?? []]);
+
+    /// <summary>
+    /// Sets the access token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The access token lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetAccessTokenLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.AccessTokenLifetime, (long?) lifetime?.TotalSeconds);
 
     /// <summary>
     /// Sets the access token lifetime associated with the claims principal.
@@ -1544,7 +3196,16 @@ public static class OpenIddictExtensions
     /// <param name="lifetime">The access token lifetime to store.</param>
     /// <returns>The claims principal.</returns>
     public static ClaimsPrincipal SetAccessTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
-        => principal.SetClaim(Claims.Private.AccessTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
+        => principal.SetClaim(Claims.Private.AccessTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the authorization code lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The authorization code lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetAuthorizationCodeLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.AuthorizationCodeLifetime, (long?) lifetime?.TotalSeconds);
 
     /// <summary>
     /// Sets the authorization code lifetime associated with the claims principal.
@@ -1553,7 +3214,16 @@ public static class OpenIddictExtensions
     /// <param name="lifetime">The authorization code lifetime to store.</param>
     /// <returns>The claims principal.</returns>
     public static ClaimsPrincipal SetAuthorizationCodeLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
-        => principal.SetClaim(Claims.Private.AuthorizationCodeLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
+        => principal.SetClaim(Claims.Private.AuthorizationCodeLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the device code lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The device code lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetDeviceCodeLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.DeviceCodeLifetime, (long?) lifetime?.TotalSeconds);
 
     /// <summary>
     /// Sets the device code lifetime associated with the claims principal.
@@ -1562,7 +3232,16 @@ public static class OpenIddictExtensions
     /// <param name="lifetime">The device code lifetime to store.</param>
     /// <returns>The claims principal.</returns>
     public static ClaimsPrincipal SetDeviceCodeLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
-        => principal.SetClaim(Claims.Private.DeviceCodeLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
+        => principal.SetClaim(Claims.Private.DeviceCodeLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the identity token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The identity token lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetIdentityTokenLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.IdentityTokenLifetime, (long?) lifetime?.TotalSeconds);
 
     /// <summary>
     /// Sets the identity token lifetime associated with the claims principal.
@@ -1571,7 +3250,34 @@ public static class OpenIddictExtensions
     /// <param name="lifetime">The identity token lifetime to store.</param>
     /// <returns>The claims principal.</returns>
     public static ClaimsPrincipal SetIdentityTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
-        => principal.SetClaim(Claims.Private.IdentityTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
+        => principal.SetClaim(Claims.Private.IdentityTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the issued token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The issued token lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetIssuedTokenLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.IssuedTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the issued token lifetime associated with the claims principal.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="lifetime">The issued token lifetime to store.</param>
+    /// <returns>The claims principal.</returns>
+    public static ClaimsPrincipal SetIssuedTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+        => principal.SetClaim(Claims.Private.IssuedTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the refresh token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The refresh token lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetRefreshTokenLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.RefreshTokenLifetime, (long?) lifetime?.TotalSeconds);
 
     /// <summary>
     /// Sets the refresh token lifetime associated with the claims principal.
@@ -1580,7 +3286,52 @@ public static class OpenIddictExtensions
     /// <param name="lifetime">The refresh token lifetime to store.</param>
     /// <returns>The claims principal.</returns>
     public static ClaimsPrincipal SetRefreshTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
-        => principal.SetClaim(Claims.Private.RefreshTokenLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
+        => principal.SetClaim(Claims.Private.RefreshTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the request token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The request token lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetRequestTokenLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.RequestTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the request token lifetime associated with the claims principal.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="lifetime">The request token lifetime to store.</param>
+    /// <returns>The claims principal.</returns>
+    public static ClaimsPrincipal SetRequestTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+        => principal.SetClaim(Claims.Private.RequestTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the state token lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The state token lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetStateTokenLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.StateTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the state token lifetime associated with the claims principal.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="lifetime">The state token lifetime to store.</param>
+    /// <returns>The claims principal.</returns>
+    public static ClaimsPrincipal SetStateTokenLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
+        => principal.SetClaim(Claims.Private.StateTokenLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the user code lifetime associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="lifetime">The user code lifetime to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetUserCodeLifetime(this ClaimsIdentity identity, TimeSpan? lifetime)
+        => identity.SetClaim(Claims.Private.UserCodeLifetime, (long?) lifetime?.TotalSeconds);
 
     /// <summary>
     /// Sets the user code lifetime associated with the claims principal.
@@ -1589,7 +3340,16 @@ public static class OpenIddictExtensions
     /// <param name="lifetime">The user code lifetime to store.</param>
     /// <returns>The claims principal.</returns>
     public static ClaimsPrincipal SetUserCodeLifetime(this ClaimsPrincipal principal, TimeSpan? lifetime)
-        => principal.SetClaim(Claims.Private.UserCodeLifetime, lifetime?.TotalSeconds.ToString(CultureInfo.InvariantCulture));
+        => principal.SetClaim(Claims.Private.UserCodeLifetime, (long?) lifetime?.TotalSeconds);
+
+    /// <summary>
+    /// Sets the internal authorization identifier associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="identifier">The unique identifier to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetAuthorizationId(this ClaimsIdentity identity, string? identifier)
+        => identity.SetClaim(Claims.Private.AuthorizationId, identifier);
 
     /// <summary>
     /// Sets the internal authorization identifier associated with the claims principal.
@@ -1601,6 +3361,33 @@ public static class OpenIddictExtensions
         => principal.SetClaim(Claims.Private.AuthorizationId, identifier);
 
     /// <summary>
+    /// Sets the internal session identifier associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="identifier">The unique identifier to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetSessionId(this ClaimsIdentity identity, string? identifier)
+        => identity.SetClaim(Claims.Private.SessionId, identifier);
+
+    /// <summary>
+    /// Sets the internal session identifier associated with the claims principal.
+    /// </summary>
+    /// <param name="principal">The claims principal.</param>
+    /// <param name="identifier">The unique identifier to store.</param>
+    /// <returns>The claims principal.</returns>
+    public static ClaimsPrincipal SetSessionId(this ClaimsPrincipal principal, string? identifier)
+        => principal.SetClaim(Claims.Private.SessionId, identifier);
+
+    /// <summary>
+    /// Sets the internal token identifier associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="identifier">The unique identifier to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetTokenId(this ClaimsIdentity identity, string? identifier)
+        => identity.SetClaim(Claims.Private.TokenId, identifier);
+
+    /// <summary>
     /// Sets the internal token identifier associated with the claims principal.
     /// </summary>
     /// <param name="principal">The claims principal.</param>
@@ -1608,6 +3395,15 @@ public static class OpenIddictExtensions
     /// <returns>The claims principal.</returns>
     public static ClaimsPrincipal SetTokenId(this ClaimsPrincipal principal, string? identifier)
         => principal.SetClaim(Claims.Private.TokenId, identifier);
+
+    /// <summary>
+    /// Sets the token type associated with the claims identity.
+    /// </summary>
+    /// <param name="identity">The claims identity.</param>
+    /// <param name="type">The token type to store.</param>
+    /// <returns>The claims identity.</returns>
+    public static ClaimsIdentity SetTokenType(this ClaimsIdentity identity, string? type)
+        => identity.SetClaim(Claims.Private.TokenType, type);
 
     /// <summary>
     /// Sets the token type associated with the claims principal.
@@ -1620,11 +3416,11 @@ public static class OpenIddictExtensions
 
     private static ImmutableArray<string> GetValues(string? source, char[] separators)
     {
-        Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
+        Debug.Assert(separators is { Length: > 0 }, SR.GetResourceString(SR.ID4001));
 
         if (string.IsNullOrEmpty(source))
         {
-            return ImmutableArray.Create<string>();
+            return [];
         }
 
         var builder = ImmutableArray.CreateBuilder<string>();
@@ -1632,7 +3428,7 @@ public static class OpenIddictExtensions
         foreach (var element in new StringTokenizer(source, separators))
         {
             var segment = Trim(element, separators);
-            if (segment.Length == 0)
+            if (!segment.HasValue || segment.Length is 0)
             {
                 continue;
             }
@@ -1651,7 +3447,7 @@ public static class OpenIddictExtensions
     private static bool HasValue(string? source, string value, char[] separators)
     {
         Debug.Assert(!string.IsNullOrEmpty(value), SR.GetResourceString(SR.ID4002));
-        Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
+        Debug.Assert(separators is { Length: > 0 }, SR.GetResourceString(SR.ID4001));
 
         if (string.IsNullOrEmpty(source))
         {
@@ -1661,7 +3457,7 @@ public static class OpenIddictExtensions
         foreach (var element in new StringTokenizer(source, separators))
         {
             var segment = Trim(element, separators);
-            if (segment.Length == 0)
+            if (!segment.HasValue || segment.Length is 0)
             {
                 continue;
             }
@@ -1677,7 +3473,12 @@ public static class OpenIddictExtensions
 
     private static StringSegment TrimStart(StringSegment segment, char[] separators)
     {
-        Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
+        Debug.Assert(separators is { Length: > 0 }, SR.GetResourceString(SR.ID4001));
+
+        if (!segment.HasValue || segment.Length is 0)
+        {
+            return segment;
+        }
 
         var index = segment.Offset;
 
@@ -1696,7 +3497,12 @@ public static class OpenIddictExtensions
 
     private static StringSegment TrimEnd(StringSegment segment, char[] separators)
     {
-        Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
+        Debug.Assert(separators is { Length: > 0 }, SR.GetResourceString(SR.ID4001));
+
+        if (!segment.HasValue || segment.Length is 0)
+        {
+            return segment;
+        }
 
         var index = segment.Offset + segment.Length - 1;
 
@@ -1715,14 +3521,14 @@ public static class OpenIddictExtensions
 
     private static StringSegment Trim(StringSegment segment, char[] separators)
     {
-        Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
+        Debug.Assert(separators is { Length: > 0 }, SR.GetResourceString(SR.ID4001));
 
         return TrimEnd(TrimStart(segment, separators), separators);
     }
 
     private static bool IsSeparator(char character, char[] separators)
     {
-        Debug.Assert(separators is not null && separators.Length != 0, SR.GetResourceString(SR.ID4001));
+        Debug.Assert(separators is { Length: > 0 }, SR.GetResourceString(SR.ID4001));
 
         for (var index = 0; index < separators!.Length; index++)
         {
@@ -1735,12 +3541,64 @@ public static class OpenIddictExtensions
         return false;
     }
 
+    private static string GetClaimValueType(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.String                      => ClaimValueTypes.String,
+        JsonValueKind.True or JsonValueKind.False => ClaimValueTypes.Boolean,
+
+        JsonValueKind.Number when element.TryGetInt32(out _)  => ClaimValueTypes.Integer32,
+        JsonValueKind.Number when element.TryGetInt64(out _)  => ClaimValueTypes.Integer64,
+        JsonValueKind.Number when element.TryGetUInt32(out _) => ClaimValueTypes.UInteger32,
+        JsonValueKind.Number when element.TryGetUInt64(out _) => ClaimValueTypes.UInteger64,
+        JsonValueKind.Number when element.TryGetDouble(out _) => ClaimValueTypes.Double,
+
+        JsonValueKind.Null or JsonValueKind.Undefined => "JSON_NULL",
+        JsonValueKind.Array                           => "JSON_ARRAY",
+        JsonValueKind.Object or _                     => "JSON"
+    };
+
+    private static string GetClaimValueType(JsonNode? node) => node switch
+    {
+        JsonValue value when value.TryGetValue<string?>(out _) => ClaimValueTypes.String,
+        JsonValue value when value.TryGetValue<bool>(out _)    => ClaimValueTypes.Boolean,
+        JsonValue value when value.TryGetValue<int>(out _)     => ClaimValueTypes.Integer32,
+        JsonValue value when value.TryGetValue<long>(out _)    => ClaimValueTypes.Integer64,
+        JsonValue value when value.TryGetValue<uint>(out _)    => ClaimValueTypes.UInteger32,
+        JsonValue value when value.TryGetValue<ulong>(out _)   => ClaimValueTypes.UInteger64,
+        JsonValue value when value.TryGetValue<double>(out _)  => ClaimValueTypes.Double,
+
+        null       => "JSON_NULL",
+        JsonArray  => "JSON_ARRAY",
+        JsonObject => "JSON",
+
+        JsonValue value when value.TryGetValue(out JsonElement element) => GetClaimValueType(element),
+
+        // If the JSON node cannot be mapped to a primitive type, convert it to
+        // a JsonElement instance and infer the corresponding claim value type.
+        JsonNode value => GetClaimValueType(value.Deserialize(OpenIddictSerializer.Default.JsonElement))
+    };
+
+    private static TimeSpan? GetLifetime(ClaimsIdentity identity, string type)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        var value = identity.GetClaim(type);
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        if (double.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out double result))
+        {
+            return TimeSpan.FromSeconds(result);
+        }
+
+        return null;
+    }
+
     private static TimeSpan? GetLifetime(ClaimsPrincipal principal, string type)
     {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
+        ArgumentNullException.ThrowIfNull(principal);
 
         var value = principal.GetClaim(type);
         if (string.IsNullOrEmpty(value))

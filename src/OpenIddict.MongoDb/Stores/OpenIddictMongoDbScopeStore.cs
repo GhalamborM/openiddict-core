@@ -5,6 +5,7 @@
  */
 
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -12,22 +13,37 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using OpenIddict.MongoDb.Models;
+using static OpenIddict.Abstractions.OpenIddictExceptions;
 
 namespace OpenIddict.MongoDb;
 
 /// <summary>
 /// Provides methods allowing to manage the scopes stored in a database.
 /// </summary>
-/// <typeparam name="TScope">The type of the Scope entity.</typeparam>
-public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
+public class OpenIddictMongoDbScopeStore : OpenIddictMongoDbScopeStore<OpenIddictMongoDbScope>
+{
+    public OpenIddictMongoDbScopeStore(
+        IOpenIddictMongoDbContext context,
+        IOptionsMonitor<OpenIddictMongoDbOptions> options)
+        : base(context, options)
+    {
+    }
+}
+
+/// <summary>
+/// Provides methods allowing to manage the scopes stored in a database.
+/// </summary>
+/// <typeparam name="TScope">The type of the scope entity.</typeparam>
+public class OpenIddictMongoDbScopeStore<
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TScope> : IOpenIddictScopeStore<TScope>
     where TScope : OpenIddictMongoDbScope
 {
     public OpenIddictMongoDbScopeStore(
         IOpenIddictMongoDbContext context,
         IOptionsMonitor<OpenIddictMongoDbOptions> options)
     {
-        Context = context;
-        Options = options;
+        Context = context ?? throw new ArgumentNullException(nameof(context));
+        Options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>
@@ -50,27 +66,22 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
     }
 
     /// <inheritdoc/>
-    public virtual async ValueTask<long> CountAsync<TResult>(
-        Func<IQueryable<TScope>, IQueryable<TResult>> query, CancellationToken cancellationToken)
+    public virtual async ValueTask<long> CountAsync<TState, TResult>(
+        Func<IQueryable<TScope>, TState, IQueryable<TResult>> query,
+        TState state, CancellationToken cancellationToken)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
-        return await ((IMongoQueryable<TScope>) query(collection.AsQueryable())).LongCountAsync(cancellationToken);
+        return await query(collection.AsQueryable(), state).LongCountAsync(cancellationToken);
     }
 
     /// <inheritdoc/>
     public virtual async ValueTask CreateAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
@@ -81,29 +92,23 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
     /// <inheritdoc/>
     public virtual async ValueTask DeleteAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
         if ((await collection.DeleteOneAsync(entity =>
             entity.Id == scope.Id &&
-            entity.ConcurrencyToken == scope.ConcurrencyToken, cancellationToken)).DeletedCount == 0)
+            entity.ConcurrencyToken == scope.ConcurrencyToken, cancellationToken)).DeletedCount is 0)
         {
-            throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0245));
+            throw new ConcurrencyException(SR.GetResourceString(SR.ID0239));
         }
     }
 
     /// <inheritdoc/>
     public virtual async ValueTask<TScope?> FindByIdAsync(string identifier, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(identifier))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
@@ -114,10 +119,7 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
     /// <inheritdoc/>
     public virtual async ValueTask<TScope?> FindByNameAsync(string name, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0202), nameof(name));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(name);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
@@ -128,7 +130,7 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
     /// <inheritdoc/>
     public virtual IAsyncEnumerable<TScope> FindByNamesAsync(ImmutableArray<string> names, CancellationToken cancellationToken)
     {
-        if (names.Any(name => string.IsNullOrEmpty(name)))
+        if (names.Any(string.IsNullOrEmpty))
         {
             throw new ArgumentException(SR.GetResourceString(SR.ID0203), nameof(names));
         }
@@ -140,9 +142,7 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
             var database = await Context.GetDatabaseAsync(cancellationToken);
             var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
-            // Note: Enumerable.Contains() is deliberately used without the extension method syntax to ensure
-            // ImmutableArray.Contains() (which is not fully supported by MongoDB) is not used instead.
-            await foreach (var scope in collection.Find(scope => Enumerable.Contains(names, scope.Name)).ToAsyncEnumerable(cancellationToken))
+            await foreach (var scope in collection.Find(scope => names.Contains(scope.Name!)).ToAsyncEnumerable().WithCancellation(cancellationToken))
             {
                 yield return scope;
             }
@@ -152,10 +152,7 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
     /// <inheritdoc/>
     public virtual IAsyncEnumerable<TScope> FindByResourceAsync(string resource, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(resource))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0062), nameof(resource));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(resource);
 
         return ExecuteAsync(cancellationToken);
 
@@ -164,7 +161,7 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
             var database = await Context.GetDatabaseAsync(cancellationToken);
             var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
-            await foreach (var scope in collection.Find(scope => scope.Resources.Contains(resource)).ToAsyncEnumerable(cancellationToken))
+            await foreach (var scope in collection.Find(scope => scope.Resources!.Contains(resource)).ToAsyncEnumerable().WithCancellation(cancellationToken))
             {
                 yield return scope;
             }
@@ -176,131 +173,93 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
         Func<IQueryable<TScope>, TState, IQueryable<TResult>> query,
         TState state, CancellationToken cancellationToken)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
-        return await ((IMongoQueryable<TResult>) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
+        return await query(collection.AsQueryable(), state).FirstOrDefaultAsync(cancellationToken);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetDescriptionAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        return new ValueTask<string?>(scope.Description);
+        return new(scope.Description);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableDictionary<CultureInfo, string>> GetDescriptionsAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        if (scope.Descriptions is null || scope.Descriptions.Count == 0)
-        {
-            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(ImmutableDictionary.Create<CultureInfo, string>());
-        }
-
-        return new ValueTask<ImmutableDictionary<CultureInfo, string>>(scope.Descriptions.ToImmutableDictionary());
+        return new(scope.Descriptions is { Count: > 0 } descriptions
+            ? descriptions.ToImmutableDictionary(static pair => CultureInfo.GetCultureInfo(pair.Key), static pair => pair.Value)
+            : []);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetDisplayNameAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        return new ValueTask<string?>(scope.DisplayName);
+        return new(scope.DisplayName);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableDictionary<CultureInfo, string>> GetDisplayNamesAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        if (scope.DisplayNames is null || scope.DisplayNames.Count == 0)
-        {
-            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(ImmutableDictionary.Create<CultureInfo, string>());
-        }
-
-        return new ValueTask<ImmutableDictionary<CultureInfo, string>>(scope.DisplayNames.ToImmutableDictionary());
+        return new(scope.DisplayNames is { Count: > 0 } names
+            ? names.ToImmutableDictionary(static pair => CultureInfo.GetCultureInfo(pair.Key), static pair => pair.Value)
+            : []);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetIdAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        return new ValueTask<string?>(scope.Id.ToString());
+        return new(scope.Id.ToString());
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetNameAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        return new ValueTask<string?>(scope.Name);
+        return new(scope.Name);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         if (scope.Properties is null)
         {
-            return new ValueTask<ImmutableDictionary<string, JsonElement>>(ImmutableDictionary.Create<string, JsonElement>());
+            return new([]);
         }
 
         using var document = JsonDocument.Parse(scope.Properties.ToJson());
-        var builder = ImmutableDictionary.CreateBuilder<string, JsonElement>();
+        var builder = ImmutableDictionary.CreateBuilder<string, JsonElement>(StringComparer.Ordinal);
 
         foreach (var property in document.RootElement.EnumerateObject())
         {
             builder[property.Name] = property.Value.Clone();
         }
 
-        return new ValueTask<ImmutableDictionary<string, JsonElement>>(builder.ToImmutable());
+        return new(builder.ToImmutable());
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableArray<string>> GetResourcesAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        if (scope.Resources is null || scope.Resources.Count == 0)
-        {
-            return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
-        }
-
-        return new ValueTask<ImmutableArray<string>>(scope.Resources.ToImmutableArray());
+        return new(scope.Resources is { IsDefaultOrEmpty: false } resources ? resources : []);
     }
 
     /// <inheritdoc/>
@@ -308,13 +267,13 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
     {
         try
         {
-            return new ValueTask<TScope>(Activator.CreateInstance<TScope>());
+            return new(Activator.CreateInstance<TScope>());
         }
 
         catch (MemberAccessException exception)
         {
-            return new ValueTask<TScope>(Task.FromException<TScope>(
-                new InvalidOperationException(SR.GetResourceString(SR.ID0246), exception)));
+            return new(Task.FromException<TScope>(
+                new InvalidOperationException(SR.GetResourceString(SR.ID0240), exception)));
         }
     }
 
@@ -325,19 +284,19 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
-        var query = (IMongoQueryable<TScope>) collection.AsQueryable().OrderBy(scope => scope.Id);
+        var query = (IQueryable<TScope>) collection.AsQueryable().OrderBy(static scope => scope.Id);
 
-        if (offset.HasValue)
+        if (offset is not null)
         {
             query = query.Skip(offset.Value);
         }
 
-        if (count.HasValue)
+        if (count is not null)
         {
             query = query.Take(count.Value);
         }
 
-        await foreach (var scope in ((IAsyncCursorSource<TScope>) query).ToAsyncEnumerable(cancellationToken))
+        await foreach (var scope in ((IAsyncCursorSource<TScope>) query).ToAsyncEnumerable().WithCancellation(cancellationToken))
         {
             yield return scope;
         }
@@ -348,10 +307,7 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
         Func<IQueryable<TScope>, TState, IQueryable<TResult>> query,
         TState state, CancellationToken cancellationToken)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         return ExecuteAsync(cancellationToken);
 
@@ -360,7 +316,7 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
             var database = await Context.GetDatabaseAsync(cancellationToken);
             var collection = database.GetCollection<TScope>(Options.CurrentValue.ScopesCollectionName);
 
-            await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
+            await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable().WithCancellation(cancellationToken))
             {
                 yield return element;
             }
@@ -370,84 +326,70 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
     /// <inheritdoc/>
     public virtual ValueTask SetDescriptionAsync(TScope scope, string? description, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         scope.Description = description;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetDescriptionsAsync(TScope scope,
         ImmutableDictionary<CultureInfo, string> descriptions, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        scope.Descriptions = descriptions;
+        scope.Descriptions = descriptions is { Count: > 0 }
+            ? descriptions.ToImmutableDictionary(static pair => pair.Key.Name, static pair => pair.Value, StringComparer.Ordinal)
+            : null;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetDisplayNamesAsync(TScope scope,
         ImmutableDictionary<CultureInfo, string> names, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        scope.DisplayNames = names;
+        scope.DisplayNames = names is { Count: > 0 }
+            ? names.ToImmutableDictionary(static pair => pair.Key.Name, static pair => pair.Value, StringComparer.Ordinal)
+            : null;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetDisplayNameAsync(TScope scope, string? name, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         scope.DisplayName = name;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetNameAsync(TScope scope, string? name, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         scope.Name = name;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetPropertiesAsync(TScope scope,
         ImmutableDictionary<string, JsonElement> properties, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        if (properties is null || properties.IsEmpty)
+        if (properties is not { IsEmpty: false })
         {
             scope.Properties = null;
 
-            return default;
+            return ValueTask.CompletedTask;
         }
 
         using var stream = new MemoryStream();
@@ -470,36 +412,23 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
 
         scope.Properties = BsonDocument.Parse(Encoding.UTF8.GetString(stream.ToArray()));
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetResourcesAsync(TScope scope, ImmutableArray<string> resources, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
-        if (resources.IsDefaultOrEmpty)
-        {
-            scope.Resources = ImmutableList.Create<string>();
+        scope.Resources = resources is { IsDefaultOrEmpty: false } ? resources : null;
 
-            return default;
-        }
-
-        scope.Resources = resources.ToImmutableList();
-
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual async ValueTask UpdateAsync(TScope scope, CancellationToken cancellationToken)
     {
-        if (scope is null)
-        {
-            throw new ArgumentNullException(nameof(scope));
-        }
+        ArgumentNullException.ThrowIfNull(scope);
 
         // Generate a new concurrency token and attach it
         // to the scope before persisting the changes.
@@ -511,9 +440,9 @@ public class OpenIddictMongoDbScopeStore<TScope> : IOpenIddictScopeStore<TScope>
 
         if ((await collection.ReplaceOneAsync(entity =>
             entity.Id == scope.Id &&
-            entity.ConcurrencyToken == timestamp, scope, null as ReplaceOptions, cancellationToken)).MatchedCount == 0)
+            entity.ConcurrencyToken == timestamp, scope, null as ReplaceOptions, cancellationToken)).MatchedCount is 0)
         {
-            throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0245));
+            throw new ConcurrencyException(SR.GetResourceString(SR.ID0239));
         }
     }
 }

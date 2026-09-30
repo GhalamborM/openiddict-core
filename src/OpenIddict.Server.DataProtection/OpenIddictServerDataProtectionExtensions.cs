@@ -22,13 +22,10 @@ public static class OpenIddictServerDataProtectionExtensions
     /// </summary>
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictServerBuilder"/> instance.</returns>
     public static OpenIddictServerDataProtectionBuilder UseDataProtection(this OpenIddictServerBuilder builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         builder.Services.AddDataProtection();
 
@@ -36,12 +33,15 @@ public static class OpenIddictServerDataProtectionExtensions
         // Note: the order used here is not important, as the actual order is set in the options.
         builder.Services.TryAdd(OpenIddictServerDataProtectionHandlers.DefaultHandlers.Select(descriptor => descriptor.ServiceDescriptor));
 
+        // Register the built-in filters used by the default OpenIddict Data Protection event handlers.
+        builder.Services.TryAddSingleton<RequireDataProtectionTokenFormat>();
+
         // Note: TryAddEnumerable() is used here to ensure the initializers are registered only once.
-        builder.Services.TryAddEnumerable(new[]
-        {
-            ServiceDescriptor.Singleton<IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerDataProtectionConfiguration>(),
-            ServiceDescriptor.Singleton<IPostConfigureOptions<OpenIddictServerDataProtectionOptions>, OpenIddictServerDataProtectionConfiguration>()
-        });
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerDataProtectionConfiguration>());
+
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<OpenIddictServerDataProtectionOptions>, OpenIddictServerDataProtectionConfiguration>());
 
         return new OpenIddictServerDataProtectionBuilder(builder.Services);
     }
@@ -53,19 +53,12 @@ public static class OpenIddictServerDataProtectionExtensions
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <param name="configuration">The configuration delegate used to configure the server services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictServerBuilder"/> instance.</returns>
     public static OpenIddictServerBuilder UseDataProtection(
         this OpenIddictServerBuilder builder, Action<OpenIddictServerDataProtectionBuilder> configuration)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(builder.UseDataProtection());
 

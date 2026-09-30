@@ -4,12 +4,12 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Buffers.Text;
 using System.Collections.Immutable;
 using System.Security.Claims;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 using static OpenIddict.Validation.DataProtection.OpenIddictValidationDataProtectionConstants.Purposes;
 using static OpenIddict.Validation.OpenIddictValidationHandlers.Protection;
 using Schemes = OpenIddict.Validation.DataProtection.OpenIddictValidationDataProtectionConstants.Purposes.Schemes;
@@ -20,28 +20,29 @@ public static partial class OpenIddictValidationDataProtectionHandlers
 {
     public static class Protection
     {
-        public static ImmutableArray<OpenIddictValidationHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
+        public static ImmutableArray<OpenIddictValidationHandlerDescriptor> DefaultHandlers { get; } =
+        [
             /*
              * Token validation:
              */
-            ValidateDataProtectionToken.Descriptor);
+            ValidateDataProtectionToken.Descriptor
+        ];
 
         /// <summary>
-        /// Contains the logic responsible of validating tokens generated using Data Protection.
+        /// Contains the logic responsible for validating tokens generated using Data Protection.
         /// </summary>
-        public class ValidateDataProtectionToken : IOpenIddictValidationHandler<ValidateTokenContext>
+        public sealed class ValidateDataProtectionToken : IOpenIddictValidationHandler<ValidateTokenContext>
         {
             private readonly IOptionsMonitor<OpenIddictValidationDataProtectionOptions> _options;
 
             public ValidateDataProtectionToken(IOptionsMonitor<OpenIddictValidationDataProtectionOptions> options)
-                => _options = options;
+                => _options = options ?? throw new ArgumentNullException(nameof(options));
 
             /// <summary>
             /// Gets the default descriptor definition assigned to this handler.
             /// </summary>
             public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
                 = OpenIddictValidationHandlerDescriptor.CreateBuilder<ValidateTokenContext>()
-                    .AddFilter<RequireLocalValidation>()
                     .UseSingletonHandler<ValidateDataProtectionToken>()
                     .SetOrder(ValidateIdentityModelToken.Descriptor.Order + 500)
                     .SetType(OpenIddictValidationHandlerType.BuiltIn)
@@ -53,14 +54,30 @@ public static partial class OpenIddictValidationDataProtectionHandlers
                 // If a principal was already attached, don't overwrite it.
                 if (context.Principal is not null)
                 {
-                    return default;
+                    return ValueTask.CompletedTask;
                 }
 
-                // Note: ASP.NET Core Data Protection tokens always start with "CfDJ8", that corresponds
-                // to the base64 representation of the magic "09 F0 C9 F0" header identifying DP payloads.
-                if (!context.Token.StartsWith("CfDJ8", StringComparison.Ordinal))
+                // If a specific token format is expected, return immediately if it doesn't match the expected value.
+                if (context.TokenFormat is not null and not TokenFormats.Private.DataProtection)
                 {
-                    return default;
+                    return ValueTask.CompletedTask;
+                }
+
+                // Note: ASP.NET Core Data Protection tokens created by the default implementation always start
+                // with "CfDJ8", that corresponds to the base64 representation of the "09 F0 C9 F0" value used
+                // by KeyRingBasedDataProtectionProvider as a Data Protection version identifier/magic header.
+                //
+                // Unless a custom provider implementation - that may use a different mechanism - has been
+                // registered, return immediately if the token doesn't start with the expected magic header.
+                //
+                // See https://learn.microsoft.com/en-us/aspnet/core/security/data-protection/implementation/authenticated-encryption-details
+                // for more information.
+                if (!context.Token.StartsWith("CfDJ8", StringComparison.Ordinal) &&
+                    string.Equals(_options.CurrentValue.DataProtectionProvider.GetType().FullName,
+                        "Microsoft.AspNetCore.DataProtection.KeyManagement.KeyRingBasedDataProtectionProvider",
+                        StringComparison.Ordinal))
+                {
+                    return ValueTask.CompletedTask;
                 }
 
                 // Note: unlike the equivalent handler in the server stack, the logic used here is
@@ -68,10 +85,10 @@ public static partial class OpenIddictValidationDataProtectionHandlers
                 var principal = context.ValidTokenTypes.Count switch
                 {
                     // If no valid token type was set, all supported token types are allowed.
-                    0 => ValidateToken(TokenTypeHints.AccessToken),
+                    0 => ValidateToken(TokenTypeIdentifiers.AccessToken),
 
-                    _ when context.ValidTokenTypes.Contains(TokenTypeHints.AccessToken)
-                        => ValidateToken(TokenTypeHints.AccessToken),
+                    _ when context.ValidTokenTypes.Contains(TokenTypeIdentifiers.AccessToken)
+                        => ValidateToken(TokenTypeIdentifiers.AccessToken),
 
                     _ => null // The token type is not supported by the Data Protection integration (e.g identity tokens).
                 };
@@ -83,31 +100,34 @@ public static partial class OpenIddictValidationDataProtectionHandlers
                         description: SR.GetResourceString(SR.ID2004),
                         uri: SR.FormatID8000(SR.ID2004));
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }
 
                 context.Principal = principal;
 
-                context.Logger.LogTrace(SR.GetResourceString(SR.ID6152), context.Token, context.Principal.Claims);
+                context.Logger.LogTrace(6152, SR.GetResourceString(SR.ID6152), context.Token, context.Principal.Claims);
 
-                return default;
+                return ValueTask.CompletedTask;
 
                 ClaimsPrincipal? ValidateToken(string type)
                 {
                     // Create a Data Protection protector using the provider registered in the options.
-                    var protector = _options.CurrentValue.DataProtectionProvider.CreateProtector(type switch
-                    {
-                        // Note: reference tokens are encrypted using a different "purpose" string than non-reference tokens.
-                        TokenTypeHints.AccessToken when !string.IsNullOrEmpty(context.TokenId)
-                            => new[] { Handlers.Server, Formats.AccessToken, Features.ReferenceTokens, Schemes.Server },
-                        TokenTypeHints.AccessToken => new[] { Handlers.Server, Formats.AccessToken, Schemes.Server },
+                    //
+                    // Note: reference tokens are encrypted using a different "purpose" string than non-reference tokens.
+                    var protector = _options.CurrentValue.DataProtectionProvider.CreateProtector(
+                        (type, context.IsReferenceToken) switch
+                        {
+                            (TokenTypeIdentifiers.AccessToken, true)
+                                => [Handlers.Server, Formats.AccessToken, Features.ReferenceTokens, Schemes.Server],
+                            (TokenTypeIdentifiers.AccessToken, false)
+                                => [Handlers.Server, Formats.AccessToken, Schemes.Server],
 
-                        _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0003))
-                    });
+                            _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0003))
+                        });
 
                     try
                     {
-                        using var buffer = new MemoryStream(protector.Unprotect(Base64UrlEncoder.DecodeBytes(context.Token)));
+                        using var buffer = new MemoryStream(protector.Unprotect(Base64Url.DecodeFromChars(context.Token)));
                         using var reader = new BinaryReader(buffer);
 
                         // Note: since the data format relies on a data protector using different "purposes" strings
@@ -115,9 +135,9 @@ public static partial class OpenIddictValidationDataProtectionHandlers
                         return _options.CurrentValue.Formatter.ReadToken(reader)?.SetTokenType(type);
                     }
 
-                    catch (Exception exception)
+                    catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
                     {
-                        context.Logger.LogTrace(exception, SR.GetResourceString(SR.ID6153), context.Token);
+                        context.Logger.LogTrace(6153, exception, SR.GetResourceString(SR.ID6153), context.Token);
 
                         return null;
                     }

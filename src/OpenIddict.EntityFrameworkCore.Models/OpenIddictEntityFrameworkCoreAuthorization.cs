@@ -5,87 +5,94 @@
  */
 
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace OpenIddict.EntityFrameworkCore.Models;
 
 /// <summary>
 /// Represents an OpenIddict authorization.
 /// </summary>
-public class OpenIddictEntityFrameworkCoreAuthorization : OpenIddictEntityFrameworkCoreAuthorization<string, OpenIddictEntityFrameworkCoreApplication, OpenIddictEntityFrameworkCoreToken>
+public class OpenIddictEntityFrameworkCoreAuthorization :
+    OpenIddictEntityFrameworkCoreAuthorization<string,
+                                               OpenIddictEntityFrameworkCoreApplication,
+                                               OpenIddictEntityFrameworkCoreSession,
+                                               OpenIddictEntityFrameworkCoreToken>
 {
-    public OpenIddictEntityFrameworkCoreAuthorization()
-    {
-        // Generate a new string identifier.
-        Id = Guid.NewGuid().ToString();
-    }
+    public OpenIddictEntityFrameworkCoreAuthorization() => Id = Guid.NewGuid().ToString();
 }
 
 /// <summary>
 /// Represents an OpenIddict authorization.
 /// </summary>
-public class OpenIddictEntityFrameworkCoreAuthorization<TKey> : OpenIddictEntityFrameworkCoreAuthorization<TKey, OpenIddictEntityFrameworkCoreApplication<TKey>, OpenIddictEntityFrameworkCoreToken<TKey>>
-    where TKey : notnull, IEquatable<TKey>
-{
-}
+public class OpenIddictEntityFrameworkCoreAuthorization<TKey> :
+    OpenIddictEntityFrameworkCoreAuthorization<TKey,
+                                               OpenIddictEntityFrameworkCoreApplication<TKey>,
+                                               OpenIddictEntityFrameworkCoreSession<TKey>,
+                                               OpenIddictEntityFrameworkCoreToken<TKey>>
+    where TKey : notnull, IEquatable<TKey>;
 
 /// <summary>
 /// Represents an OpenIddict authorization.
 /// </summary>
 [DebuggerDisplay("Id = {Id.ToString(),nq} ; Subject = {Subject,nq} ; Type = {Type,nq} ; Status = {Status,nq}")]
-public class OpenIddictEntityFrameworkCoreAuthorization<TKey, TApplication, TToken>
+public class OpenIddictEntityFrameworkCoreAuthorization<TKey, TApplication, TSession, TToken>
     where TKey : notnull, IEquatable<TKey>
     where TApplication : class
+    where TSession : class
     where TToken : class
 {
     /// <summary>
-    /// Gets or sets the application associated with the current authorization.
+    /// Gets or sets the application associated with the authorization.
     /// </summary>
     public virtual TApplication? Application { get; set; }
 
     /// <summary>
-    /// Gets or sets the concurrency token.
+    /// Gets or sets the concurrency token of the authorization.
     /// </summary>
     public virtual string? ConcurrencyToken { get; set; } = Guid.NewGuid().ToString();
 
     /// <summary>
-    /// Gets or sets the UTC creation date of the current authorization.
+    /// Gets or sets the UTC creation date of the authorization.
     /// </summary>
     public virtual DateTime? CreationDate { get; set; }
 
     /// <summary>
-    /// Gets or sets the unique identifier associated with the current authorization.
+    /// Gets or sets the unique identifier of the authorization.
     /// </summary>
     public virtual TKey? Id { get; set; }
 
     /// <summary>
-    /// Gets or sets the additional properties serialized as a JSON object,
-    /// or <c>null</c> if no bag was associated with the current authorization.
+    /// Gets or sets the additional properties of the authorization.
     /// </summary>
-    public virtual string? Properties { get; set; }
+    public virtual IDictionary<string, JsonElement>? Properties { get; set; }
 
     /// <summary>
-    /// Gets or sets the scopes associated with the current
-    /// authorization, serialized as a JSON array.
+    /// Gets or sets the scopes of the authorization.
     /// </summary>
-    public virtual string? Scopes { get; set; }
+    public virtual string[]? Scopes { get; set; }
 
     /// <summary>
-    /// Gets or sets the status of the current authorization.
+    /// Gets the list of the sessions associated with the authorization.
+    /// </summary>
+    public virtual ICollection<TSession> Sessions { get; } = new HashSet<TSession>();
+
+    /// <summary>
+    /// Gets or sets the status of the authorization.
     /// </summary>
     public virtual string? Status { get; set; }
 
     /// <summary>
-    /// Gets or sets the subject associated with the current authorization.
+    /// Gets or sets the subject of the authorization.
     /// </summary>
     public virtual string? Subject { get; set; }
 
     /// <summary>
-    /// Gets the list of tokens associated with the current authorization.
+    /// Gets the list of tokens associated with the authorization.
     /// </summary>
     public virtual ICollection<TToken> Tokens { get; } = new HashSet<TToken>();
 
     /// <summary>
-    /// Gets or sets the type of the current authorization.
+    /// Gets or sets the type of the authorization.
     /// </summary>
     public virtual string? Type { get; set; }
 }

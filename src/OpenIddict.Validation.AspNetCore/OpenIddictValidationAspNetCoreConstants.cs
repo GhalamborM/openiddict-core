@@ -11,12 +11,6 @@ namespace OpenIddict.Validation.AspNetCore;
 /// </summary>
 public static class OpenIddictValidationAspNetCoreConstants
 {
-    public static class Cache
-    {
-        public const string AuthorizationRequest = "openiddict-authorization-request:";
-        public const string LogoutRequest = "openiddict-logout-request:";
-    }
-
     public static class Properties
     {
         public const string AccessTokenPrincipal = ".access_token_principal";
@@ -24,5 +18,10 @@ public static class OpenIddictValidationAspNetCoreConstants
         public const string ErrorDescription = ".error_description";
         public const string ErrorUri = ".error_uri";
         public const string Scope = ".scope";
+    }
+
+    public static class Tokens
+    {
+        public const string AccessToken = "access_token";
     }
 }

@@ -4,6 +4,7 @@
  * the license and the contributors participating to this project.
  */
 
+using System.ComponentModel;
 using Microsoft.Extensions.Options;
 
 namespace OpenIddict.Server.AspNetCore;
@@ -11,67 +12,102 @@ namespace OpenIddict.Server.AspNetCore;
 /// <summary>
 /// Contains the methods required to ensure that the OpenIddict server configuration is valid.
 /// </summary>
-public class OpenIddictServerAspNetCoreConfiguration : IConfigureOptions<AuthenticationOptions>,
-                                                       IConfigureOptions<OpenIddictServerOptions>,
-                                                       IPostConfigureOptions<AuthenticationOptions>,
-                                                       IPostConfigureOptions<OpenIddictServerAspNetCoreOptions>
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictServerAspNetCoreConfiguration : IConfigureOptions<AuthenticationOptions>,
+                                                              IConfigureOptions<OpenIddictServerOptions>,
+                                                              IPostConfigureOptions<AuthenticationOptions>,
+                                                              IPostConfigureOptions<OpenIddictServerOptions>,
+                                                              IValidateOptions<AuthenticationOptions>,
+                                                              IValidateOptions<OpenIddictServerAspNetCoreOptions>
 {
-    /// <summary>
-    /// Registers the OpenIddict server handler in the global authentication options.
-    /// </summary>
-    /// <param name="options">The options instance to initialize.</param>
+    /// <inheritdoc/>
     public void Configure(AuthenticationOptions options)
     {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
+        ArgumentNullException.ThrowIfNull(options);
 
-        // If a handler was already registered and the type doesn't correspond to the OpenIddict handler, throw an exception.
-        if (options.SchemeMap.TryGetValue(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, out var builder) &&
-            builder.HandlerType != typeof(OpenIddictServerAspNetCoreHandler))
+        // Register the authentication scheme handler used by the OpenIddict ASP.NET Core server integration.
+        if (!options.SchemeMap.ContainsKey(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme))
         {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0108));
+            options.AddScheme<OpenIddictServerAspNetCoreHandler>(
+                OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, displayName: null);
         }
-
-        options.AddScheme<OpenIddictServerAspNetCoreHandler>(
-            OpenIddictServerAspNetCoreDefaults.AuthenticationScheme, displayName: null);
     }
 
+    /// <inheritdoc/>
     public void Configure(OpenIddictServerOptions options)
     {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
+        ArgumentNullException.ThrowIfNull(options);
 
         // Register the built-in event handlers used by the OpenIddict ASP.NET Core server components.
         options.Handlers.AddRange(OpenIddictServerAspNetCoreHandlers.DefaultHandlers);
+
+        // Enable client_secret_basic support by default.
+        options.ClientAuthenticationMethods.Add(ClientAuthenticationMethods.ClientSecretBasic);
     }
 
-    /// <summary>
-    /// Ensures that the authentication configuration is in a consistent and valid state.
-    /// </summary>
-    /// <param name="name">The name of the options instance to configure, if applicable.</param>
-    /// <param name="options">The options instance to initialize.</param>
-    public void PostConfigure(string name, AuthenticationOptions options)
+    /// <inheritdoc/>
+    public void PostConfigure(string? name, AuthenticationOptions options)
     {
-        if (options is null)
+        ArgumentNullException.ThrowIfNull(options);
+
+        // Starting in ASP.NET 7.0, the authentication stack integrates a fallback
+        // mechanism to select the default scheme to use when no value is set, but
+        // only if a single handler has been registered in the authentication options.
+        //
+        // Unfortunately, this behavior is problematic for OpenIddict as it enforces
+        // strict checks to prevent calling certain unsafe authentication operations
+        // on invalid endpoints. To opt out this undesirable behavior, a fake entry
+        // is dynamically added if one of the default schemes properties is not set
+        // and less than 2 handlers were registered in the authentication options.
+        if (options.SchemeMap.Count is < 2 && string.IsNullOrEmpty(options.DefaultScheme) &&
+           (string.IsNullOrEmpty(options.DefaultAuthenticateScheme) ||
+            string.IsNullOrEmpty(options.DefaultChallengeScheme) ||
+            string.IsNullOrEmpty(options.DefaultForbidScheme) ||
+            string.IsNullOrEmpty(options.DefaultSignInScheme) ||
+            string.IsNullOrEmpty(options.DefaultSignOutScheme)))
         {
-            throw new ArgumentNullException(nameof(options));
+            options.AddScheme<IAuthenticationHandler>(Guid.NewGuid().ToString(), displayName: null);
+        }
+    }
+
+    /// <inheritdoc/>
+    public void PostConfigure(string? name, OpenIddictServerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        // Enable tls_client_auth and self_signed_tls_client_auth support if the
+        // corresponding chain policies have been configured in the server options.
+        if (options.PublicKeyInfrastructureTlsClientAuthenticationPolicy is not null)
+        {
+            options.ClientAuthenticationMethods.Add(ClientAuthenticationMethods.TlsClientAuth);
         }
 
-        if (!TryValidate(options.SchemeMap, options.DefaultAuthenticateScheme) ||
-            !TryValidate(options.SchemeMap, options.DefaultChallengeScheme) ||
-            !TryValidate(options.SchemeMap, options.DefaultForbidScheme) ||
-            !TryValidate(options.SchemeMap, options.DefaultScheme) ||
-            !TryValidate(options.SchemeMap, options.DefaultSignInScheme) ||
-            !TryValidate(options.SchemeMap, options.DefaultSignOutScheme))
+        if (options.SelfSignedTlsClientAuthenticationPolicy is not null)
         {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0109));
+            options.ClientAuthenticationMethods.Add(ClientAuthenticationMethods.SelfSignedTlsClientAuth);
+        }
+    }
+
+    /// <inheritdoc/>
+    public ValidateOptionsResult Validate(string? name, AuthenticationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var builder = new ValidateOptionsResultBuilder();
+
+        if (!ValidateDefaultScheme(options.SchemeMap, options.DefaultAuthenticateScheme) ||
+            !ValidateDefaultScheme(options.SchemeMap, options.DefaultChallengeScheme) ||
+            !ValidateDefaultScheme(options.SchemeMap, options.DefaultForbidScheme) ||
+            !ValidateDefaultScheme(options.SchemeMap, options.DefaultScheme) ||
+            !ValidateDefaultScheme(options.SchemeMap, options.DefaultSignInScheme) ||
+            !ValidateDefaultScheme(options.SchemeMap, options.DefaultSignOutScheme))
+        {
+            builder.AddError(SR.GetResourceString(SR.ID0109));
         }
 
-        static bool TryValidate(IDictionary<string, AuthenticationSchemeBuilder> map, string? scheme)
+        return builder.Build();
+
+        static bool ValidateDefaultScheme(IDictionary<string, AuthenticationSchemeBuilder> map, string? scheme)
         {
             // If the scheme was not set or if it cannot be found in the map, return true.
             if (string.IsNullOrEmpty(scheme) || !map.TryGetValue(scheme, out var builder))
@@ -83,22 +119,18 @@ public class OpenIddictServerAspNetCoreConfiguration : IConfigureOptions<Authent
         }
     }
 
-    /// <summary>
-    /// Populates the default OpenIddict server ASP.NET Core options and
-    /// ensures that the configuration is in a consistent and valid state.
-    /// </summary>
-    /// <param name="name">The name of the options instance to configure, if applicable.</param>
-    /// <param name="options">The options instance to initialize.</param>
-    public void PostConfigure(string name, OpenIddictServerAspNetCoreOptions options)
+    /// <inheritdoc/>
+    public ValidateOptionsResult Validate(string? name, OpenIddictServerAspNetCoreOptions options)
     {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
+        ArgumentNullException.ThrowIfNull(options);
+
+        var builder = new ValidateOptionsResultBuilder();
 
         if (options.EnableErrorPassthrough && options.EnableStatusCodePagesIntegration)
         {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0110));
+            builder.AddError(SR.GetResourceString(SR.ID0110));
         }
+
+        return builder.Build();
     }
 }

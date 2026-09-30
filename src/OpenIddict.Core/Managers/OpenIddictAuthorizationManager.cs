@@ -7,12 +7,12 @@
 using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
 using System.Runtime.CompilerServices;
-using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using static OpenIddict.Abstractions.OpenIddictExceptions;
+using ValidationException = OpenIddict.Abstractions.OpenIddictExceptions.ValidationException;
 
 namespace OpenIddict.Core;
 
@@ -21,22 +21,28 @@ namespace OpenIddict.Core;
 /// </summary>
 /// <remarks>
 /// Applications that do not want to depend on a specific entity type can use the non-generic
-/// <see cref="IOpenIddictAuthorizationManager"/> instead, for which the actual entity type
-/// is resolved at runtime based on the default entity type registered in the core options.
+/// <see cref="IOpenIddictAuthorizationManager"/> instead, for which the actual entity type is resolved at runtime.
 /// </remarks>
-/// <typeparam name="TAuthorization">The type of the Authorization entity.</typeparam>
+/// <typeparam name="TAuthorization">The type of the authorization entity.</typeparam>
 public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthorizationManager where TAuthorization : class
 {
+    /// <summary>
+    /// Creates a new instance of the <see cref="OpenIddictAuthorizationManager{TAuthorization}"/> class.
+    /// </summary>
+    /// <param name="cache">The cache.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="options">The options.</param>
+    /// <param name="store">The store.</param>
     public OpenIddictAuthorizationManager(
         IOpenIddictAuthorizationCache<TAuthorization> cache,
         ILogger<OpenIddictAuthorizationManager<TAuthorization>> logger,
         IOptionsMonitor<OpenIddictCoreOptions> options,
-        IOpenIddictAuthorizationStoreResolver resolver)
+        IOpenIddictAuthorizationStore<TAuthorization> store)
     {
-        Cache = cache;
-        Logger = logger;
-        Options = options;
-        Store = resolver.Get<TAuthorization>();
+        Cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        Logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        Options = options ?? throw new ArgumentNullException(nameof(options));
+        Store = store ?? throw new ArgumentNullException(nameof(store));
     }
 
     /// <summary>
@@ -64,7 +70,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// </summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of authorizations in the database.
     /// </returns>
     public virtual ValueTask<long> CountAsync(CancellationToken cancellationToken = default)
@@ -77,18 +83,36 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="query">The query to execute.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of authorizations that match the specified query.
     /// </returns>
     public virtual ValueTask<long> CountAsync<TResult>(
         Func<IQueryable<TAuthorization>, IQueryable<TResult>> query, CancellationToken cancellationToken = default)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
-        return Store.CountAsync(query, cancellationToken);
+        return CountAsync(static (authorizations, query) => query(authorizations), query, cancellationToken);
+    }
+
+    /// <summary>
+    /// Determines the number of authorizations that match the specified query.
+    /// </summary>
+    /// <typeparam name="TState">The state type.</typeparam>
+    /// <typeparam name="TResult">The result type.</typeparam>
+    /// <param name="query">The query to execute.</param>
+    /// <param name="state">The optional state.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns the number of authorizations that match the specified query.
+    /// </returns>
+    public virtual ValueTask<long> CountAsync<TState, TResult>(
+        Func<IQueryable<TAuthorization>, TState, IQueryable<TResult>> query,
+        TState state, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        return Store.CountAsync(query, state, cancellationToken);
     }
 
     /// <summary>
@@ -101,10 +125,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// </returns>
     public virtual async ValueTask CreateAsync(TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         // If no status was explicitly specified, assume that the authorization is valid.
         if (string.IsNullOrEmpty(await Store.GetStatusAsync(authorization, cancellationToken)))
@@ -112,11 +133,17 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
             await Store.SetStatusAsync(authorization, Statuses.Valid, cancellationToken);
         }
 
+        // If no creation date was explicitly specified, set it to the current time.
+        if (await Store.GetCreationDateAsync(authorization, cancellationToken) is null)
+        {
+            await Store.SetCreationDateAsync(authorization, Options.CurrentValue.TimeProvider.GetUtcNow(), cancellationToken);
+        }
+
         var results = await GetValidationResultsAsync(authorization, cancellationToken);
-        if (results.Any(result => result != ValidationResult.Success))
+        if (results.Any(static result => result != ValidationResult.Success))
         {
             var builder = new StringBuilder();
-            builder.AppendLine(SR.GetResourceString(SR.ID0219));
+            builder.AppendLine(SR.GetResourceString(SR.ID0207));
             builder.AppendLine();
 
             foreach (var result in results)
@@ -124,7 +151,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
                 builder.AppendLine(result.ErrorMessage);
             }
 
-            throw new OpenIddictExceptions.ValidationException(builder.ToString(), results);
+            throw new ValidationException(builder.ToString(), results);
         }
 
         await Store.CreateAsync(authorization, cancellationToken);
@@ -154,77 +181,20 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="descriptor">The authorization descriptor.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation, whose result returns the authorization.
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation, whose result returns the authorization.
     /// </returns>
     public virtual async ValueTask<TAuthorization> CreateAsync(
         OpenIddictAuthorizationDescriptor descriptor, CancellationToken cancellationToken = default)
     {
-        if (descriptor is null)
-        {
-            throw new ArgumentNullException(nameof(descriptor));
-        }
+        ArgumentNullException.ThrowIfNull(descriptor);
 
-        var authorization = await Store.InstantiateAsync(cancellationToken);
-        if (authorization is null)
-        {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0220));
-        }
+        var authorization = await Store.InstantiateAsync(cancellationToken)
+            ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0208));
 
         await PopulateAsync(authorization, descriptor, cancellationToken);
         await CreateAsync(authorization, cancellationToken);
 
         return authorization;
-    }
-
-    /// <summary>
-    /// Creates a new permanent authorization based on the specified parameters.
-    /// </summary>
-    /// <param name="principal">The principal associated with the authorization.</param>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="type">The authorization type.</param>
-    /// <param name="scopes">The minimal scopes associated with the authorization.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation, whose result returns the authorization.
-    /// </returns>
-    public virtual ValueTask<TAuthorization> CreateAsync(
-        ClaimsPrincipal principal, string subject, string client,
-        string type, ImmutableArray<string> scopes, CancellationToken cancellationToken = default)
-    {
-        if (principal is null)
-        {
-            throw new ArgumentNullException(nameof(principal));
-        }
-
-        if (string.IsNullOrEmpty(subject))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0198), nameof(subject));
-        }
-
-        if (string.IsNullOrEmpty(client))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0124), nameof(client));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0200), nameof(type));
-        }
-
-        var descriptor = new OpenIddictAuthorizationDescriptor
-        {
-            ApplicationId = client,
-            CreationDate = DateTimeOffset.UtcNow,
-            Principal = principal,
-            Status = Statuses.Valid,
-            Subject = subject,
-            Type = type
-        };
-
-        descriptor.Scopes.UnionWith(scopes);
-
-        return CreateAsync(descriptor, cancellationToken);
     }
 
     /// <summary>
@@ -237,10 +207,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// </returns>
     public virtual async ValueTask DeleteAsync(TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         if (!Options.CurrentValue.DisableEntityCaching)
         {
@@ -251,87 +218,18 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     }
 
     /// <summary>
-    /// Retrieves the authorizations corresponding to the specified
-    /// subject and associated with the application identifier.
+    /// Retrieves the authorizations matching the specified query.
     /// </summary>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The authorizations corresponding to the subject/client.</returns>
-    public virtual IAsyncEnumerable<TAuthorization> FindAsync(
-        string subject, string client, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(subject))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0198), nameof(subject));
-        }
-
-        if (string.IsNullOrEmpty(client))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0124), nameof(client));
-        }
-
-        var authorizations = Options.CurrentValue.DisableEntityCaching ?
-            Store.FindAsync(subject, client, cancellationToken) :
-            Cache.FindAsync(subject, client, cancellationToken);
-
-        // SQL engines like Microsoft SQL Server or MySQL are known to use case-insensitive lookups by default.
-        // To ensure a case-sensitive comparison is enforced independently of the database/table/query collation
-        // used by the store, a second pass using string.Equals(StringComparison.Ordinal) is manually made here.
-
-        if (Options.CurrentValue.DisableAdditionalFiltering)
-        {
-            return authorizations;
-        }
-
-        // SQL engines like Microsoft SQL Server or MySQL are known to use case-insensitive lookups by default.
-        // To ensure a case-sensitive comparison is enforced independently of the database/table/query collation
-        // used by the store, a second pass using string.Equals(StringComparison.Ordinal) is manually made here.
-
-        return ExecuteAsync(cancellationToken);
-
-        async IAsyncEnumerable<TAuthorization> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await foreach (var authorization in authorizations)
-            {
-                if (string.Equals(await Store.GetSubjectAsync(authorization, cancellationToken), subject, StringComparison.Ordinal))
-                {
-                    yield return authorization;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Retrieves the authorizations matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="status">The authorization status.</param>
+    /// <param name="query">The query parameters: if a parameter is <see langword="null"/>, it will not be used to filter the results.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The authorizations corresponding to the criteria.</returns>
     public virtual IAsyncEnumerable<TAuthorization> FindAsync(
-        string subject, string client,
-        string status, CancellationToken cancellationToken = default)
+        (string? Subject, string? ApplicationId, string? Status,
+         string? Type, ImmutableArray<string>? RequiredScopes) query, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(subject))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0198), nameof(subject));
-        }
-
-        if (string.IsNullOrEmpty(client))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0124), nameof(client));
-        }
-
-        if (string.IsNullOrEmpty(status))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0199), nameof(status));
-        }
-
-        var authorizations = Options.CurrentValue.DisableEntityCaching ?
-            Store.FindAsync(subject, client, status, cancellationToken) :
-            Cache.FindAsync(subject, client, status, cancellationToken);
+        var authorizations = Options.CurrentValue.DisableEntityCaching
+            ? Store.FindAsync(query, cancellationToken)
+            : Cache.FindAsync(query, cancellationToken);
 
         if (Options.CurrentValue.DisableAdditionalFiltering)
         {
@@ -346,136 +244,16 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
 
         async IAsyncEnumerable<TAuthorization> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            await foreach (var authorization in authorizations)
+            await foreach (var authorization in authorizations.WithCancellation(cancellationToken))
             {
-                if (string.Equals(await Store.GetSubjectAsync(authorization, cancellationToken), subject, StringComparison.Ordinal))
-                {
-                    yield return authorization;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Retrieves the authorizations matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="status">The authorization status.</param>
-    /// <param name="type">The authorization type.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The authorizations corresponding to the criteria.</returns>
-    public virtual IAsyncEnumerable<TAuthorization> FindAsync(
-        string subject, string client,
-        string status, string type, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(subject))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0198), nameof(subject));
-        }
-
-        if (string.IsNullOrEmpty(client))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0124), nameof(client));
-        }
-
-        if (string.IsNullOrEmpty(status))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0199), nameof(status));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0200), nameof(type));
-        }
-
-        var authorizations = Options.CurrentValue.DisableEntityCaching ?
-            Store.FindAsync(subject, client, status, type, cancellationToken) :
-            Cache.FindAsync(subject, client, status, type, cancellationToken);
-
-        if (Options.CurrentValue.DisableAdditionalFiltering)
-        {
-            return authorizations;
-        }
-
-        // SQL engines like Microsoft SQL Server or MySQL are known to use case-insensitive lookups by default.
-        // To ensure a case-sensitive comparison is enforced independently of the database/table/query collation
-        // used by the store, a second pass using string.Equals(StringComparison.Ordinal) is manually made here.
-
-        return ExecuteAsync(cancellationToken);
-
-        async IAsyncEnumerable<TAuthorization> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await foreach (var authorization in authorizations)
-            {
-                if (string.Equals(await Store.GetSubjectAsync(authorization, cancellationToken), subject, StringComparison.Ordinal))
-                {
-                    yield return authorization;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Retrieves the authorizations matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="status">The authorization status.</param>
-    /// <param name="type">The authorization type.</param>
-    /// <param name="scopes">The minimal scopes associated with the authorization.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The authorizations corresponding to the criteria.</returns>
-    public virtual IAsyncEnumerable<TAuthorization> FindAsync(
-        string subject, string client,
-        string status, string type,
-        ImmutableArray<string> scopes, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrEmpty(subject))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0198), nameof(subject));
-        }
-
-        if (string.IsNullOrEmpty(client))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0124), nameof(client));
-        }
-
-        if (string.IsNullOrEmpty(status))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0199), nameof(status));
-        }
-
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0200), nameof(type));
-        }
-
-        var authorizations = Options.CurrentValue.DisableEntityCaching ?
-            Store.FindAsync(subject, client, status, type, scopes, cancellationToken) :
-            Cache.FindAsync(subject, client, status, type, scopes, cancellationToken);
-
-        if (Options.CurrentValue.DisableAdditionalFiltering)
-        {
-            return authorizations;
-        }
-
-        // SQL engines like Microsoft SQL Server or MySQL are known to use case-insensitive lookups by default.
-        // To ensure a case-sensitive comparison is enforced independently of the database/table/query collation
-        // used by the store, a second pass using string.Equals(StringComparison.Ordinal) is manually made here.
-
-        return ExecuteAsync(cancellationToken);
-
-        async IAsyncEnumerable<TAuthorization> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await foreach (var authorization in authorizations)
-            {
-                if (!string.Equals(await Store.GetSubjectAsync(authorization, cancellationToken), subject, StringComparison.Ordinal))
+                if (!string.IsNullOrEmpty(query.Subject) &&
+                    !string.Equals(await Store.GetSubjectAsync(authorization, cancellationToken), query.Subject, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
-                if (!await HasScopesAsync(authorization, scopes, cancellationToken))
+                if (query.RequiredScopes is { IsDefaultOrEmpty: false } scopes &&
+                    !await HasScopesAsync(authorization, scopes, cancellationToken))
                 {
                     continue;
                 }
@@ -494,14 +272,11 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual IAsyncEnumerable<TAuthorization> FindByApplicationIdAsync(
         string identifier, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(identifier))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
 
-        var authorizations = Options.CurrentValue.DisableEntityCaching ?
-            Store.FindByApplicationIdAsync(identifier, cancellationToken) :
-            Cache.FindByApplicationIdAsync(identifier, cancellationToken);
+        var authorizations = Options.CurrentValue.DisableEntityCaching
+            ? Store.FindByApplicationIdAsync(identifier, cancellationToken)
+            : Cache.FindByApplicationIdAsync(identifier, cancellationToken);
 
         if (Options.CurrentValue.DisableAdditionalFiltering)
         {
@@ -516,7 +291,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
 
         async IAsyncEnumerable<TAuthorization> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            await foreach (var authorization in authorizations)
+            await foreach (var authorization in authorizations.WithCancellation(cancellationToken))
             {
                 if (string.Equals(await Store.GetApplicationIdAsync(authorization, cancellationToken), identifier, StringComparison.Ordinal))
                 {
@@ -532,19 +307,16 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="identifier">The unique identifier associated with the authorization.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the authorization corresponding to the identifier.
     /// </returns>
     public virtual async ValueTask<TAuthorization?> FindByIdAsync(string identifier, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(identifier))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
 
-        var authorization = Options.CurrentValue.DisableEntityCaching ?
-            await Store.FindByIdAsync(identifier, cancellationToken) :
-            await Cache.FindByIdAsync(identifier, cancellationToken);
+        var authorization = Options.CurrentValue.DisableEntityCaching
+            ? await Store.FindByIdAsync(identifier, cancellationToken)
+            : await Cache.FindByIdAsync(identifier, cancellationToken);
 
         if (authorization is null)
         {
@@ -572,14 +344,11 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual IAsyncEnumerable<TAuthorization> FindBySubjectAsync(
         string subject, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(subject))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0198), nameof(subject));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(subject);
 
-        var authorizations = Options.CurrentValue.DisableEntityCaching ?
-            Store.FindBySubjectAsync(subject, cancellationToken) :
-            Cache.FindBySubjectAsync(subject, cancellationToken);
+        var authorizations = Options.CurrentValue.DisableEntityCaching
+            ? Store.FindBySubjectAsync(subject, cancellationToken)
+            : Cache.FindBySubjectAsync(subject, cancellationToken);
 
         if (Options.CurrentValue.DisableAdditionalFiltering)
         {
@@ -594,7 +363,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
 
         async IAsyncEnumerable<TAuthorization> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            await foreach (var authorization in authorizations)
+            await foreach (var authorization in authorizations.WithCancellation(cancellationToken))
             {
                 if (string.Equals(await Store.GetSubjectAsync(authorization, cancellationToken), subject, StringComparison.Ordinal))
                 {
@@ -616,10 +385,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual ValueTask<string?> GetApplicationIdAsync(
         TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         return Store.GetApplicationIdAsync(authorization, cancellationToken);
     }
@@ -631,16 +397,13 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="query">The query to execute.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the first element returned when executing the query.
     /// </returns>
     public virtual ValueTask<TResult?> GetAsync<TResult>(
         Func<IQueryable<TAuthorization>, IQueryable<TResult>> query, CancellationToken cancellationToken = default)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         return GetAsync(static (authorizations, query) => query(authorizations), query, cancellationToken);
     }
@@ -654,17 +417,14 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the first element returned when executing the query.
     /// </returns>
     public virtual ValueTask<TResult?> GetAsync<TState, TResult>(
         Func<IQueryable<TAuthorization>, TState, IQueryable<TResult>> query,
         TState state, CancellationToken cancellationToken = default)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         return Store.GetAsync(query, state, cancellationToken);
     }
@@ -681,10 +441,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual ValueTask<DateTimeOffset?> GetCreationDateAsync(
         TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         return Store.GetCreationDateAsync(authorization, cancellationToken);
     }
@@ -700,10 +457,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// </returns>
     public virtual ValueTask<string?> GetIdAsync(TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         return Store.GetIdAsync(authorization, cancellationToken);
     }
@@ -720,10 +474,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(
         TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         return Store.GetPropertiesAsync(authorization, cancellationToken);
     }
@@ -740,10 +491,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual ValueTask<ImmutableArray<string>> GetScopesAsync(
         TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         return Store.GetScopesAsync(authorization, cancellationToken);
     }
@@ -760,10 +508,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual ValueTask<string?> GetStatusAsync(
         TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         return Store.GetStatusAsync(authorization, cancellationToken);
     }
@@ -780,10 +525,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual ValueTask<string?> GetSubjectAsync(
         TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         return Store.GetSubjectAsync(authorization, cancellationToken);
     }
@@ -800,10 +542,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual ValueTask<string?> GetTypeAsync(
         TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         return Store.GetTypeAsync(authorization, cancellationToken);
     }
@@ -814,17 +553,15 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="authorization">The authorization.</param>
     /// <param name="scopes">The scopes.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns><c>true</c> if the scopes are included in the authorization, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the scopes are included in the authorization, <see langword="false"/> otherwise.</returns>
     public virtual async ValueTask<bool> HasScopesAsync(TAuthorization authorization,
         ImmutableArray<string> scopes, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
-        return new HashSet<string>(await Store.GetScopesAsync(
-            authorization, cancellationToken), StringComparer.Ordinal).IsSupersetOf(scopes);
+        return (await GetScopesAsync(authorization, cancellationToken))
+            .ToHashSet(StringComparer.Ordinal)
+            .IsSupersetOf(scopes);
     }
 
     /// <summary>
@@ -833,21 +570,14 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="authorization">The authorization.</param>
     /// <param name="status">The expected status.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns><c>true</c> if the authorization has the specified status, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the authorization has the specified status, <see langword="false"/> otherwise.</returns>
     public virtual async ValueTask<bool> HasStatusAsync(TAuthorization authorization,
         string status, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
+        ArgumentException.ThrowIfNullOrEmpty(status);
 
-        if (string.IsNullOrEmpty(status))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0199), nameof(status));
-        }
-
-        return string.Equals(await Store.GetStatusAsync(authorization, cancellationToken), status, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(await GetStatusAsync(authorization, cancellationToken), status, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -856,21 +586,14 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="authorization">The authorization.</param>
     /// <param name="type">The expected type.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns><c>true</c> if the authorization has the specified type, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the authorization has the specified type, <see langword="false"/> otherwise.</returns>
     public virtual async ValueTask<bool> HasTypeAsync(
         TAuthorization authorization, string type, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
+        ArgumentException.ThrowIfNullOrEmpty(type);
 
-        if (string.IsNullOrEmpty(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0200), nameof(type));
-        }
-
-        return string.Equals(await Store.GetTypeAsync(authorization, cancellationToken), type, StringComparison.OrdinalIgnoreCase);
+        return string.Equals(await GetTypeAsync(authorization, cancellationToken), type, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -894,10 +617,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual IAsyncEnumerable<TResult> ListAsync<TResult>(
         Func<IQueryable<TAuthorization>, IQueryable<TResult>> query, CancellationToken cancellationToken = default)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         return ListAsync(static (authorizations, query) => query(authorizations), query, cancellationToken);
     }
@@ -915,10 +635,7 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
         Func<IQueryable<TAuthorization>, TState, IQueryable<TResult>> query,
         TState state, CancellationToken cancellationToken = default)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         return Store.ListAsync(query, state, cancellationToken);
     }
@@ -935,20 +652,13 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual async ValueTask PopulateAsync(TAuthorization authorization,
         OpenIddictAuthorizationDescriptor descriptor, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
-
-        if (descriptor is null)
-        {
-            throw new ArgumentNullException(nameof(descriptor));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
+        ArgumentNullException.ThrowIfNull(descriptor);
 
         await Store.SetApplicationIdAsync(authorization, descriptor.ApplicationId, cancellationToken);
         await Store.SetCreationDateAsync(authorization, descriptor.CreationDate, cancellationToken);
         await Store.SetPropertiesAsync(authorization, descriptor.Properties.ToImmutableDictionary(), cancellationToken);
-        await Store.SetScopesAsync(authorization, descriptor.Scopes.ToImmutableArray(), cancellationToken);
+        await Store.SetScopesAsync(authorization, [.. descriptor.Scopes], cancellationToken);
         await Store.SetStatusAsync(authorization, descriptor.Status, cancellationToken);
         await Store.SetSubjectAsync(authorization, descriptor.Subject, cancellationToken);
         await Store.SetTypeAsync(authorization, descriptor.Type, cancellationToken);
@@ -967,15 +677,8 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
         OpenIddictAuthorizationDescriptor descriptor,
         TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (descriptor is null)
-        {
-            throw new ArgumentNullException(nameof(descriptor));
-        }
-
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(authorization);
 
         descriptor.ApplicationId = await Store.GetApplicationIdAsync(authorization, cancellationToken);
         descriptor.CreationDate = await Store.GetCreationDateAsync(authorization, cancellationToken);
@@ -1002,27 +705,60 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// </remarks>
     /// <param name="threshold">The date before which authorizations are not pruned.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
-    /// </returns>
-    public virtual ValueTask PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken = default)
+    /// <returns>The number of authorizations that were removed.</returns>
+    public virtual ValueTask<long> PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken = default)
         => Store.PruneAsync(threshold, cancellationToken);
+
+    /// <summary>
+    /// Revokes all the authorizations matching the specified parameters.
+    /// </summary>
+    /// <param name="subject">The subject associated with the authorization, or <see langword="null"/> not to filter out specific subjects.</param>
+    /// <param name="client">The client associated with the authorization, or <see langword="null"/> not to filter out specific clients.</param>
+    /// <param name="status">The authorization status, or <see langword="null"/> not to filter out specific authorization statuses.</param>
+    /// <param name="type">The authorization type, or <see langword="null"/> not to filter out specific authorization types.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of authorizations corresponding to the criteria that were marked as revoked.</returns>
+    public virtual ValueTask<long> RevokeAsync(string? subject, string? client, string? status, string? type, CancellationToken cancellationToken = default)
+        => Store.RevokeAsync(subject, client, status, type, cancellationToken);
+
+    /// <summary>
+    /// Revokes all the authorizations associated with the specified application identifier.
+    /// </summary>
+    /// <param name="identifier">The application identifier associated with the authorizations.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of authorizations associated with the specified application that were marked as revoked.</returns>
+    public virtual ValueTask<long> RevokeByApplicationIdAsync(string identifier, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
+
+        return Store.RevokeByApplicationIdAsync(identifier, cancellationToken);
+    }
+
+    /// <summary>
+    /// Revokes all the authorizations associated with the specified subject.
+    /// </summary>
+    /// <param name="subject">The subject associated with the authorizations.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of authorizations associated with the specified subject that were marked as revoked.</returns>
+    public virtual ValueTask<long> RevokeBySubjectAsync(string subject, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(subject);
+
+        return Store.RevokeBySubjectAsync(subject, cancellationToken);
+    }
 
     /// <summary>
     /// Tries to revoke an authorization.
     /// </summary>
     /// <param name="authorization">The authorization to revoke.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns><c>true</c> if the authorization was successfully revoked, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the authorization was successfully revoked, <see langword="false"/> otherwise.</returns>
     public virtual async ValueTask<bool> TryRevokeAsync(TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         var status = await Store.GetStatusAsync(authorization, cancellationToken);
-        if (string.Equals(status, Statuses.Revoked, StringComparison.OrdinalIgnoreCase))
+        if (status is Statuses.Revoked)
         {
             return true;
         }
@@ -1033,21 +769,21 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
         {
             await UpdateAsync(authorization, cancellationToken);
 
-            Logger.LogInformation(SR.GetResourceString(SR.ID6164), await Store.GetIdAsync(authorization, cancellationToken));
+            Logger.LogInformation(6164, SR.GetResourceString(SR.ID6164), await Store.GetIdAsync(authorization, cancellationToken));
 
             return true;
         }
 
         catch (ConcurrencyException exception)
         {
-            Logger.LogDebug(exception, SR.GetResourceString(SR.ID6165), await Store.GetIdAsync(authorization, cancellationToken));
+            Logger.LogDebug(6165, exception, SR.GetResourceString(SR.ID6165), await Store.GetIdAsync(authorization, cancellationToken));
 
             return false;
         }
 
-        catch (Exception exception)
+        catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
         {
-            Logger.LogWarning(exception, SR.GetResourceString(SR.ID6166), await Store.GetIdAsync(authorization, cancellationToken));
+            Logger.LogWarning(6166, exception, SR.GetResourceString(SR.ID6166), await Store.GetIdAsync(authorization, cancellationToken));
 
             return false;
         }
@@ -1063,16 +799,13 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// </returns>
     public virtual async ValueTask UpdateAsync(TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
         var results = await GetValidationResultsAsync(authorization, cancellationToken);
-        if (results.Any(result => result != ValidationResult.Success))
+        if (results.Any(static result => result != ValidationResult.Success))
         {
             var builder = new StringBuilder();
-            builder.AppendLine(SR.GetResourceString(SR.ID0221));
+            builder.AppendLine(SR.GetResourceString(SR.ID0215));
             builder.AppendLine();
 
             foreach (var result in results)
@@ -1080,14 +813,18 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
                 builder.AppendLine(result.ErrorMessage);
             }
 
-            throw new OpenIddictExceptions.ValidationException(builder.ToString(), results);
+            throw new ValidationException(builder.ToString(), results);
+        }
+
+        if (!Options.CurrentValue.DisableEntityCaching)
+        {
+            await Cache.RemoveAsync(authorization, cancellationToken);
         }
 
         await Store.UpdateAsync(authorization, cancellationToken);
 
         if (!Options.CurrentValue.DisableEntityCaching)
         {
-            await Cache.RemoveAsync(authorization, cancellationToken);
             await Cache.AddAsync(authorization, cancellationToken);
         }
 
@@ -1117,15 +854,8 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     public virtual async ValueTask UpdateAsync(TAuthorization authorization,
         OpenIddictAuthorizationDescriptor descriptor, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
-
-        if (descriptor is null)
-        {
-            throw new ArgumentNullException(nameof(descriptor));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
+        ArgumentNullException.ThrowIfNull(descriptor);
 
         await PopulateAsync(authorization, descriptor, cancellationToken);
         await UpdateAsync(authorization, cancellationToken);
@@ -1137,46 +867,47 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
     /// <param name="authorization">The authorization.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The validation error encountered when validating the authorization.</returns>
-    public virtual async IAsyncEnumerable<ValidationResult> ValidateAsync(
-        TAuthorization authorization, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public virtual IAsyncEnumerable<ValidationResult> ValidateAsync(
+        TAuthorization authorization, CancellationToken cancellationToken = default)
     {
-        if (authorization is null)
-        {
-            throw new ArgumentNullException(nameof(authorization));
-        }
+        ArgumentNullException.ThrowIfNull(authorization);
 
-        var type = await Store.GetTypeAsync(authorization, cancellationToken);
-        if (string.IsNullOrEmpty(type))
-        {
-            yield return new ValidationResult(SR.GetResourceString(SR.ID2116));
-        }
+        return ExecuteAsync(cancellationToken);
 
-        else if (!string.Equals(type, AuthorizationTypes.AdHoc, StringComparison.OrdinalIgnoreCase) &&
-                 !string.Equals(type, AuthorizationTypes.Permanent, StringComparison.OrdinalIgnoreCase))
+        async IAsyncEnumerable<ValidationResult> ExecuteAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
-            yield return new ValidationResult(SR.GetResourceString(SR.ID2117));
-        }
-
-        if (string.IsNullOrEmpty(await Store.GetStatusAsync(authorization, cancellationToken)))
-        {
-            yield return new ValidationResult(SR.GetResourceString(SR.ID2038));
-        }
-
-        // Ensure that the scopes are not null or empty and do not contain spaces.
-        foreach (var scope in await Store.GetScopesAsync(authorization, cancellationToken))
-        {
-            if (string.IsNullOrEmpty(scope))
+            var type = await Store.GetTypeAsync(authorization, cancellationToken);
+            if (string.IsNullOrEmpty(type))
             {
-                yield return new ValidationResult(SR.GetResourceString(SR.ID2039));
-
-                break;
+                yield return new ValidationResult(SR.GetResourceString(SR.ID2116));
             }
 
-            if (scope.Contains(Separators.Space[0]))
+            else if (type is not (AuthorizationTypes.AdHoc or AuthorizationTypes.Permanent))
             {
-                yield return new ValidationResult(SR.GetResourceString(SR.ID2042));
+                yield return new ValidationResult(SR.GetResourceString(SR.ID2117));
+            }
 
-                break;
+            if (string.IsNullOrEmpty(await Store.GetStatusAsync(authorization, cancellationToken)))
+            {
+                yield return new ValidationResult(SR.GetResourceString(SR.ID2038));
+            }
+
+            // Ensure that the scopes are not null or empty and do not contain spaces.
+            foreach (var scope in await Store.GetScopesAsync(authorization, cancellationToken))
+            {
+                if (string.IsNullOrEmpty(scope))
+                {
+                    yield return new ValidationResult(SR.GetResourceString(SR.ID2039));
+
+                    break;
+                }
+
+                if (scope.Contains(Separators.Space[0], StringComparison.Ordinal))
+                {
+                    yield return new ValidationResult(SR.GetResourceString(SR.ID2042));
+
+                    break;
+                }
             }
         }
     }
@@ -1190,8 +921,8 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
         => CountAsync(query, cancellationToken);
 
     /// <inheritdoc/>
-    async ValueTask<object> IOpenIddictAuthorizationManager.CreateAsync(ClaimsPrincipal principal, string subject, string client, string type, ImmutableArray<string> scopes, CancellationToken cancellationToken)
-        => await CreateAsync(principal, subject, client, type, scopes, cancellationToken);
+    ValueTask<long> IOpenIddictAuthorizationManager.CountAsync<TState, TResult>(Func<IQueryable<object>, TState, IQueryable<TResult>> query, TState state, CancellationToken cancellationToken)
+        => CountAsync(query, state, cancellationToken);
 
     /// <inheritdoc/>
     async ValueTask<object> IOpenIddictAuthorizationManager.CreateAsync(OpenIddictAuthorizationDescriptor descriptor, CancellationToken cancellationToken)
@@ -1206,20 +937,8 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
         => DeleteAsync((TAuthorization) authorization, cancellationToken);
 
     /// <inheritdoc/>
-    IAsyncEnumerable<object> IOpenIddictAuthorizationManager.FindAsync(string subject, string client, CancellationToken cancellationToken)
-        => FindAsync(subject, client, cancellationToken);
-
-    /// <inheritdoc/>
-    IAsyncEnumerable<object> IOpenIddictAuthorizationManager.FindAsync(string subject, string client, string status, CancellationToken cancellationToken)
-        => FindAsync(subject, client, status, cancellationToken);
-
-    /// <inheritdoc/>
-    IAsyncEnumerable<object> IOpenIddictAuthorizationManager.FindAsync(string subject, string client, string status, string type, CancellationToken cancellationToken)
-        => FindAsync(subject, client, status, type, cancellationToken);
-
-    /// <inheritdoc/>
-    IAsyncEnumerable<object> IOpenIddictAuthorizationManager.FindAsync(string subject, string client, string status, string type, ImmutableArray<string> scopes, CancellationToken cancellationToken)
-        => FindAsync(subject, client, status, type, scopes, cancellationToken);
+    IAsyncEnumerable<object> IOpenIddictAuthorizationManager.FindAsync((string? Subject, string? ApplicationId, string? Status, string? Type, ImmutableArray<string>? RequiredScopes) query, CancellationToken cancellationToken)
+        => FindAsync(query, cancellationToken);
 
     /// <inheritdoc/>
     IAsyncEnumerable<object> IOpenIddictAuthorizationManager.FindByApplicationIdAsync(string identifier, CancellationToken cancellationToken)
@@ -1305,8 +1024,20 @@ public class OpenIddictAuthorizationManager<TAuthorization> : IOpenIddictAuthori
         => PopulateAsync((TAuthorization) authorization, descriptor, cancellationToken);
 
     /// <inheritdoc/>
-    ValueTask IOpenIddictAuthorizationManager.PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken)
+    ValueTask<long> IOpenIddictAuthorizationManager.PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken)
         => PruneAsync(threshold, cancellationToken);
+
+    /// <inheritdoc/>
+    ValueTask<long> IOpenIddictAuthorizationManager.RevokeAsync(string? subject, string? client, string? status, string? type, CancellationToken cancellationToken)
+        => RevokeAsync(subject, client, status, type, cancellationToken);
+
+    /// <inheritdoc/>
+    ValueTask<long> IOpenIddictAuthorizationManager.RevokeByApplicationIdAsync(string identifier, CancellationToken cancellationToken)
+        => RevokeByApplicationIdAsync(identifier, cancellationToken);
+
+    /// <inheritdoc/>
+    ValueTask<long> IOpenIddictAuthorizationManager.RevokeBySubjectAsync(string subject, CancellationToken cancellationToken)
+        => RevokeBySubjectAsync(subject, cancellationToken);
 
     /// <inheritdoc/>
     ValueTask<bool> IOpenIddictAuthorizationManager.TryRevokeAsync(object authorization, CancellationToken cancellationToken)

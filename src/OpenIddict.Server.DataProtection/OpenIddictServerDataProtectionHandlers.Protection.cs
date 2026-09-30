@@ -4,12 +4,12 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Buffers.Text;
 using System.Collections.Immutable;
 using System.Security.Claims;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 using static OpenIddict.Server.DataProtection.OpenIddictServerDataProtectionConstants.Purposes;
 using static OpenIddict.Server.OpenIddictServerHandlers.Protection;
 using Schemes = OpenIddict.Server.DataProtection.OpenIddictServerDataProtectionConstants.Purposes.Schemes;
@@ -20,7 +20,8 @@ public static partial class OpenIddictServerDataProtectionHandlers
 {
     public static class Protection
     {
-        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
+        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } =
+        [
             /*
              * Token validation:
              */
@@ -29,17 +30,19 @@ public static partial class OpenIddictServerDataProtectionHandlers
             /*
              * Token generation:
              */
-            GenerateDataProtectionToken.Descriptor);
+            OverrideGeneratedTokenFormat.Descriptor,
+            GenerateDataProtectionToken.Descriptor
+        ];
 
         /// <summary>
-        /// Contains the logic responsible of validating tokens generated using Data Protection.
+        /// Contains the logic responsible for validating tokens generated using Data Protection.
         /// </summary>
-        public class ValidateDataProtectionToken : IOpenIddictServerHandler<ValidateTokenContext>
+        public sealed class ValidateDataProtectionToken : IOpenIddictServerHandler<ValidateTokenContext>
         {
             private readonly IOptionsMonitor<OpenIddictServerDataProtectionOptions> _options;
 
             public ValidateDataProtectionToken(IOptionsMonitor<OpenIddictServerDataProtectionOptions> options)
-                => _options = options;
+                => _options = options ?? throw new ArgumentNullException(nameof(options));
 
             /// <summary>
             /// Gets the default descriptor definition assigned to this handler.
@@ -57,14 +60,30 @@ public static partial class OpenIddictServerDataProtectionHandlers
                 // If a principal was already attached, don't overwrite it.
                 if (context.Principal is not null)
                 {
-                    return default;
+                    return ValueTask.CompletedTask;
                 }
 
-                // Note: ASP.NET Core Data Protection tokens always start with "CfDJ8", that corresponds
-                // to the base64 representation of the magic "09 F0 C9 F0" header identifying DP payloads.
-                if (!context.Token.StartsWith("CfDJ8", StringComparison.Ordinal))
+                // If a specific token format is expected, return immediately if it doesn't match the expected value.
+                if (context.TokenFormat is not null and not TokenFormats.Private.DataProtection)
                 {
-                    return default;
+                    return ValueTask.CompletedTask;
+                }
+
+                // Note: ASP.NET Core Data Protection tokens created by the default implementation always start
+                // with "CfDJ8", that corresponds to the base64 representation of the "09 F0 C9 F0" value used
+                // by KeyRingBasedDataProtectionProvider as a Data Protection version identifier/magic header.
+                //
+                // Unless a custom provider implementation - that may use a different mechanism - has been
+                // registered, return immediately if the token doesn't start with the expected magic header.
+                //
+                // See https://learn.microsoft.com/en-us/aspnet/core/security/data-protection/implementation/authenticated-encryption-details
+                // for more information.
+                if (!context.Token.StartsWith("CfDJ8", StringComparison.Ordinal) &&
+                    string.Equals(_options.CurrentValue.DataProtectionProvider.GetType().FullName,
+                        "Microsoft.AspNetCore.DataProtection.KeyManagement.KeyRingBasedDataProtectionProvider",
+                        StringComparison.Ordinal))
+                {
+                    return ValueTask.CompletedTask;
                 }
 
                 // Tokens generated using ASP.NET Core Data Protection are encrypted by symmetric keys
@@ -89,50 +108,32 @@ public static partial class OpenIddictServerDataProtectionHandlers
                     // In this case, common types (e.g access/refresh tokens) are checked first.
                     0 => context.TokenTypeHint switch
                     {
-                        TokenTypeHints.AuthorizationCode =>
-                            ValidateToken(TokenTypeHints.AuthorizationCode) ??
-                            ValidateToken(TokenTypeHints.AccessToken)       ??
-                            ValidateToken(TokenTypeHints.RefreshToken)      ??
-                            ValidateToken(TokenTypeHints.DeviceCode)        ??
-                            ValidateToken(TokenTypeHints.UserCode),
-
-                        TokenTypeHints.DeviceCode =>
-                            ValidateToken(TokenTypeHints.DeviceCode)        ??
-                            ValidateToken(TokenTypeHints.AccessToken)       ??
-                            ValidateToken(TokenTypeHints.RefreshToken)      ??
-                            ValidateToken(TokenTypeHints.AuthorizationCode) ??
-                            ValidateToken(TokenTypeHints.UserCode),
-
                         TokenTypeHints.RefreshToken =>
-                            ValidateToken(TokenTypeHints.RefreshToken)      ??
-                            ValidateToken(TokenTypeHints.AccessToken)       ??
-                            ValidateToken(TokenTypeHints.AuthorizationCode) ??
-                            ValidateToken(TokenTypeHints.DeviceCode)        ??
-                            ValidateToken(TokenTypeHints.UserCode),
+                            ValidateToken(TokenTypeIdentifiers.RefreshToken)
+                            ?? ValidateToken(TokenTypeIdentifiers.AccessToken)
+                            ?? ValidateToken(TokenTypeIdentifiers.Private.AuthorizationCode)
+                            ?? ValidateToken(TokenTypeIdentifiers.Private.DeviceCode)
+                            ?? ValidateToken(TokenTypeIdentifiers.Private.UserCode)
+                            ?? ValidateToken(TokenTypeIdentifiers.Private.RequestToken),
 
-                        TokenTypeHints.UserCode =>
-                            ValidateToken(TokenTypeHints.UserCode)          ??
-                            ValidateToken(TokenTypeHints.AccessToken)       ??
-                            ValidateToken(TokenTypeHints.RefreshToken)      ??
-                            ValidateToken(TokenTypeHints.AuthorizationCode) ??
-                            ValidateToken(TokenTypeHints.DeviceCode),
-
-                        _ =>
-                            ValidateToken(TokenTypeHints.AccessToken)       ??
-                            ValidateToken(TokenTypeHints.RefreshToken)      ??
-                            ValidateToken(TokenTypeHints.AuthorizationCode) ??
-                            ValidateToken(TokenTypeHints.DeviceCode)        ??
-                            ValidateToken(TokenTypeHints.UserCode),
+                        TokenTypeHints.AccessToken or _ =>
+                            ValidateToken(TokenTypeIdentifiers.AccessToken)
+                            ?? ValidateToken(TokenTypeIdentifiers.RefreshToken)
+                            ?? ValidateToken(TokenTypeIdentifiers.Private.AuthorizationCode)
+                            ?? ValidateToken(TokenTypeIdentifiers.Private.DeviceCode)
+                            ?? ValidateToken(TokenTypeIdentifiers.Private.UserCode)
+                            ?? ValidateToken(TokenTypeIdentifiers.Private.RequestToken),
                     },
 
                     // If a single valid token type was set, ignore the specified token type hint.
                     1 => context.ValidTokenTypes.ElementAt(0) switch
                     {
-                        TokenTypeHints.AccessToken       => ValidateToken(TokenTypeHints.AccessToken),
-                        TokenTypeHints.RefreshToken      => ValidateToken(TokenTypeHints.RefreshToken),
-                        TokenTypeHints.AuthorizationCode => ValidateToken(TokenTypeHints.AuthorizationCode),
-                        TokenTypeHints.DeviceCode        => ValidateToken(TokenTypeHints.DeviceCode),
-                        TokenTypeHints.UserCode          => ValidateToken(TokenTypeHints.UserCode),
+                        TokenTypeIdentifiers.AccessToken               => ValidateToken(TokenTypeIdentifiers.AccessToken),
+                        TokenTypeIdentifiers.RefreshToken              => ValidateToken(TokenTypeIdentifiers.RefreshToken),
+                        TokenTypeIdentifiers.Private.AuthorizationCode => ValidateToken(TokenTypeIdentifiers.Private.AuthorizationCode),
+                        TokenTypeIdentifiers.Private.DeviceCode        => ValidateToken(TokenTypeIdentifiers.Private.DeviceCode),
+                        TokenTypeIdentifiers.Private.RequestToken      => ValidateToken(TokenTypeIdentifiers.Private.RequestToken),
+                        TokenTypeIdentifiers.Private.UserCode          => ValidateToken(TokenTypeIdentifiers.Private.UserCode),
 
                         _ => null // The token type is not supported by the Data Protection integration (e.g identity tokens).
                     },
@@ -142,23 +143,26 @@ public static partial class OpenIddictServerDataProtectionHandlers
                     _ => context.ValidTokenTypes.OrderBy(type => type switch
                     {
                         // If the token type hint corresponds to one of the valid types, test it first.
-                        string value when value == context.TokenTypeHint => 0,
+                        TokenTypeIdentifiers.AccessToken  when context.TokenTypeHint is TokenTypeHints.AccessToken  => 0,
+                        TokenTypeIdentifiers.RefreshToken when context.TokenTypeHint is TokenTypeHints.RefreshToken => 0,
 
-                        TokenTypeHints.AccessToken       => 1,
-                        TokenTypeHints.RefreshToken      => 2,
-                        TokenTypeHints.AuthorizationCode => 3,
-                        TokenTypeHints.DeviceCode        => 4,
-                        TokenTypeHints.UserCode          => 5,
+                        TokenTypeIdentifiers.AccessToken               => 1,
+                        TokenTypeIdentifiers.RefreshToken              => 2,
+                        TokenTypeIdentifiers.Private.AuthorizationCode => 3,
+                        TokenTypeIdentifiers.Private.DeviceCode        => 4,
+                        TokenTypeIdentifiers.Private.UserCode          => 5,
+                        TokenTypeIdentifiers.Private.RequestToken      => 6,
 
                         _ => int.MaxValue
                     })
                     .Select(type => type switch
                     {
-                        TokenTypeHints.AccessToken       => ValidateToken(TokenTypeHints.AccessToken),
-                        TokenTypeHints.RefreshToken      => ValidateToken(TokenTypeHints.RefreshToken),
-                        TokenTypeHints.AuthorizationCode => ValidateToken(TokenTypeHints.AuthorizationCode),
-                        TokenTypeHints.DeviceCode        => ValidateToken(TokenTypeHints.DeviceCode),
-                        TokenTypeHints.UserCode          => ValidateToken(TokenTypeHints.UserCode),
+                        TokenTypeIdentifiers.AccessToken               => ValidateToken(TokenTypeIdentifiers.AccessToken),
+                        TokenTypeIdentifiers.RefreshToken              => ValidateToken(TokenTypeIdentifiers.RefreshToken),
+                        TokenTypeIdentifiers.Private.AuthorizationCode => ValidateToken(TokenTypeIdentifiers.Private.AuthorizationCode),
+                        TokenTypeIdentifiers.Private.DeviceCode        => ValidateToken(TokenTypeIdentifiers.Private.DeviceCode),
+                        TokenTypeIdentifiers.Private.UserCode          => ValidateToken(TokenTypeIdentifiers.Private.UserCode),
+                        TokenTypeIdentifiers.Private.RequestToken      => ValidateToken(TokenTypeIdentifiers.Private.RequestToken),
 
                         _ => null // The token type is not supported by the Data Protection integration (e.g identity tokens).
                     })
@@ -173,47 +177,59 @@ public static partial class OpenIddictServerDataProtectionHandlers
                         description: SR.GetResourceString(SR.ID2004),
                         uri: SR.FormatID8000(SR.ID2004));
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }
 
                 context.Principal = principal;
 
-                context.Logger.LogTrace(SR.GetResourceString(SR.ID6152), context.Token, context.Principal.Claims);
+                context.Logger.LogTrace(6152, SR.GetResourceString(SR.ID6152), context.Token, context.Principal.Claims);
 
-                return default;
+                return ValueTask.CompletedTask;
 
                 ClaimsPrincipal? ValidateToken(string type)
                 {
                     // Create a Data Protection protector using the provider registered in the options.
-                    var protector = _options.CurrentValue.DataProtectionProvider.CreateProtector(type switch
-                    {
-                        // Note: reference tokens are encrypted using a different "purpose" string than non-reference tokens.
-                        TokenTypeHints.AccessToken when !string.IsNullOrEmpty(context.TokenId)
-                            => new[] { Handlers.Server, Formats.AccessToken, Features.ReferenceTokens, Schemes.Server },
-                        TokenTypeHints.AccessToken => new[] { Handlers.Server, Formats.AccessToken, Schemes.Server },
+                    // 
+                    // Note: reference tokens are encrypted using a different "purpose" string than non-reference tokens.
+                    var protector = _options.CurrentValue.DataProtectionProvider.CreateProtector(
+                        (type, context.IsReferenceToken) switch
+                        {
+                            (TokenTypeIdentifiers.AccessToken, true)
+                                => [Handlers.Server, Formats.AccessToken, Features.ReferenceTokens, Schemes.Server],
+                            (TokenTypeIdentifiers.AccessToken, false)
+                                => [Handlers.Server, Formats.AccessToken, Schemes.Server],
 
-                        TokenTypeHints.AuthorizationCode when !string.IsNullOrEmpty(context.TokenId)
-                            => new[] { Handlers.Server, Formats.AuthorizationCode, Features.ReferenceTokens, Schemes.Server },
-                        TokenTypeHints.AuthorizationCode => new[] { Handlers.Server, Formats.AuthorizationCode, Schemes.Server },
+                            (TokenTypeIdentifiers.Private.AuthorizationCode, true)
+                                => [Handlers.Server, Formats.AuthorizationCode, Features.ReferenceTokens, Schemes.Server],
+                            (TokenTypeIdentifiers.Private.AuthorizationCode, false)
+                                => [Handlers.Server, Formats.AuthorizationCode, Schemes.Server],
 
-                        TokenTypeHints.DeviceCode when !string.IsNullOrEmpty(context.TokenId)
-                            => new[] { Handlers.Server, Formats.DeviceCode, Features.ReferenceTokens, Schemes.Server },
-                        TokenTypeHints.DeviceCode => new[] { Handlers.Server, Formats.DeviceCode, Schemes.Server },
+                            (TokenTypeIdentifiers.Private.DeviceCode, true)
+                                => [Handlers.Server, Formats.DeviceCode, Features.ReferenceTokens, Schemes.Server],
+                            (TokenTypeIdentifiers.Private.DeviceCode, false)
+                                => [Handlers.Server, Formats.DeviceCode, Schemes.Server],
 
-                        TokenTypeHints.RefreshToken when !string.IsNullOrEmpty(context.TokenId)
-                            => new[] { Handlers.Server, Formats.RefreshToken, Features.ReferenceTokens, Schemes.Server },
-                        TokenTypeHints.RefreshToken => new[] { Handlers.Server, Formats.RefreshToken, Schemes.Server },
+                            (TokenTypeIdentifiers.RefreshToken, true)
+                                => [Handlers.Server, Formats.RefreshToken, Features.ReferenceTokens, Schemes.Server],
+                            (TokenTypeIdentifiers.RefreshToken, false)
+                                => [Handlers.Server, Formats.RefreshToken, Schemes.Server],
 
-                        TokenTypeHints.UserCode when !string.IsNullOrEmpty(context.TokenId)
-                            => new[] { Handlers.Server, Formats.UserCode, Features.ReferenceTokens, Schemes.Server },
-                        TokenTypeHints.UserCode => new[] { Handlers.Server, Formats.UserCode, Schemes.Server },
+                            (TokenTypeIdentifiers.Private.UserCode, true)
+                                => [Handlers.Server, Formats.UserCode, Features.ReferenceTokens, Schemes.Server],
+                            (TokenTypeIdentifiers.Private.UserCode, false)
+                                => [Handlers.Server, Formats.UserCode, Schemes.Server],
 
-                        _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0003))
-                    });
+                            (TokenTypeIdentifiers.Private.RequestToken, true)
+                                => [Handlers.Server, Formats.RequestToken, Features.ReferenceTokens, Schemes.Server],
+                            (TokenTypeIdentifiers.Private.RequestToken, false)
+                                => [Handlers.Server, Formats.RequestToken, Schemes.Server],
+
+                            _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0003))
+                        });
 
                     try
                     {
-                        using var buffer = new MemoryStream(protector.Unprotect(Base64UrlEncoder.DecodeBytes(context.Token)));
+                        using var buffer = new MemoryStream(protector.Unprotect(Base64Url.DecodeFromChars(context.Token)));
                         using var reader = new BinaryReader(buffer);
 
                         // Note: since the data format relies on a data protector using different "purposes" strings
@@ -221,9 +237,9 @@ public static partial class OpenIddictServerDataProtectionHandlers
                         return _options.CurrentValue.Formatter.ReadToken(reader)?.SetTokenType(type);
                     }
 
-                    catch (Exception exception)
+                    catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
                     {
-                        context.Logger.LogTrace(exception, SR.GetResourceString(SR.ID6153), context.Token);
+                        context.Logger.LogTrace(6153, exception, SR.GetResourceString(SR.ID6153), context.Token);
 
                         return null;
                     }
@@ -232,20 +248,80 @@ public static partial class OpenIddictServerDataProtectionHandlers
         }
 
         /// <summary>
-        /// Contains the logic responsible of generating a token using Data Protection.
+        /// Contains the logic responsible for overriding the default token format
+        /// to generate ASP.NET Core Data Protection tokens instead of JSON Web Tokens.
         /// </summary>
-        public class GenerateDataProtectionToken : IOpenIddictServerHandler<GenerateTokenContext>
+        public sealed class OverrideGeneratedTokenFormat : IOpenIddictServerHandler<GenerateTokenContext>
         {
             private readonly IOptionsMonitor<OpenIddictServerDataProtectionOptions> _options;
 
-            public GenerateDataProtectionToken(IOptionsMonitor<OpenIddictServerDataProtectionOptions> options)
-                => _options = options;
+            public OverrideGeneratedTokenFormat(IOptionsMonitor<OpenIddictServerDataProtectionOptions> options)
+                => _options = options ?? throw new ArgumentNullException(nameof(options));
 
             /// <summary>
             /// Gets the default descriptor definition assigned to this handler.
             /// </summary>
             public static OpenIddictServerHandlerDescriptor Descriptor { get; }
                 = OpenIddictServerHandlerDescriptor.CreateBuilder<GenerateTokenContext>()
+                    .UseSingletonHandler<OverrideGeneratedTokenFormat>()
+                    .SetOrder(AttachSecurityCredentials.Descriptor.Order + 500)
+                    .SetType(OpenIddictServerHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(GenerateTokenContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // ASP.NET Core Data Protection can be used to format certain types of tokens in lieu
+                // of the default token format (typically, JSON Web Token). By default, Data Protection
+                // is automatically used for all the supported token types once the integration is enabled
+                // but the default token format can be re-enabled in the options. Alternatively, the token
+                // format can be overridden manually using a custom event handler registered after this one.
+
+                context.TokenFormat = context.TokenType switch
+                {
+                    TokenTypeIdentifiers.AccessToken when !_options.CurrentValue.PreferDefaultAccessTokenFormat
+                        => TokenFormats.Private.DataProtection,
+
+                    TokenTypeIdentifiers.Private.AuthorizationCode when !_options.CurrentValue.PreferDefaultAuthorizationCodeFormat
+                        => TokenFormats.Private.DataProtection,
+
+                    TokenTypeIdentifiers.Private.DeviceCode when !_options.CurrentValue.PreferDefaultDeviceCodeFormat
+                        => TokenFormats.Private.DataProtection,
+
+                    TokenTypeIdentifiers.RefreshToken when !_options.CurrentValue.PreferDefaultRefreshTokenFormat
+                        => TokenFormats.Private.DataProtection,
+
+                    TokenTypeIdentifiers.Private.UserCode when !_options.CurrentValue.PreferDefaultUserCodeFormat
+                        => TokenFormats.Private.DataProtection,
+
+                    TokenTypeIdentifiers.Private.RequestToken when !_options.CurrentValue.PreferDefaultRequestTokenFormat
+                        => TokenFormats.Private.DataProtection,
+
+                    _ => context.TokenFormat // Don't override the format if the token type is not supported.
+                };
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for generating a token using Data Protection.
+        /// </summary>
+        public sealed class GenerateDataProtectionToken : IOpenIddictServerHandler<GenerateTokenContext>
+        {
+            private readonly IOptionsMonitor<OpenIddictServerDataProtectionOptions> _options;
+
+            public GenerateDataProtectionToken(IOptionsMonitor<OpenIddictServerDataProtectionOptions> options)
+                => _options = options ?? throw new ArgumentNullException(nameof(options));
+
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictServerHandlerDescriptor Descriptor { get; }
+                = OpenIddictServerHandlerDescriptor.CreateBuilder<GenerateTokenContext>()
+                    .AddFilter<RequireDataProtectionTokenFormat>()
                     .UseSingletonHandler<GenerateDataProtectionToken>()
                     .SetOrder(GenerateIdentityModelToken.Descriptor.Order - 500)
                     .SetType(OpenIddictServerHandlerType.BuiltIn)
@@ -254,69 +330,64 @@ public static partial class OpenIddictServerDataProtectionHandlers
             /// <inheritdoc/>
             public ValueTask HandleAsync(GenerateTokenContext context)
             {
-                if (context is null)
-                {
-                    throw new ArgumentNullException(nameof(context));
-                }
+                ArgumentNullException.ThrowIfNull(context);
 
                 // If an access token was already attached by another handler, don't overwrite it.
                 if (!string.IsNullOrEmpty(context.Token))
                 {
-                    return default;
-                }
-
-                if (context.TokenType switch
-                {
-                    TokenTypeHints.AccessToken       => _options.CurrentValue.PreferDefaultAccessTokenFormat,
-                    TokenTypeHints.AuthorizationCode => _options.CurrentValue.PreferDefaultAuthorizationCodeFormat,
-                    TokenTypeHints.DeviceCode        => _options.CurrentValue.PreferDefaultDeviceCodeFormat,
-                    TokenTypeHints.RefreshToken      => _options.CurrentValue.PreferDefaultRefreshTokenFormat,
-                    TokenTypeHints.UserCode          => _options.CurrentValue.PreferDefaultUserCodeFormat,
-
-                    _ => true // The token type is not supported by the Data Protection integration (e.g identity tokens).
-                })
-                {
-                    return default;
+                    return ValueTask.CompletedTask;
                 }
 
                 // Create a Data Protection protector using the provider registered in the options.
-                var protector = _options.CurrentValue.DataProtectionProvider.CreateProtector(context.TokenType switch
-                {
-                    // Note: reference tokens are encrypted using a different "purpose" string than non-reference tokens.
-                    TokenTypeHints.AccessToken when context.Options.UseReferenceAccessTokens
-                        => new[] { Handlers.Server, Formats.AccessToken, Features.ReferenceTokens, Schemes.Server },
-                    TokenTypeHints.AccessToken => new[] { Handlers.Server, Formats.AccessToken, Schemes.Server },
+                //
+                // Note: reference tokens are encrypted using a different "purpose" string than non-reference tokens.
+                var protector = _options.CurrentValue.DataProtectionProvider.CreateProtector(
+                    (context.TokenType, context.IsReferenceToken) switch
+                    {
+                        (TokenTypeIdentifiers.AccessToken, true)
+                            => [Handlers.Server, Formats.AccessToken, Features.ReferenceTokens, Schemes.Server],
+                        (TokenTypeIdentifiers.AccessToken, false)
+                            => [Handlers.Server, Formats.AccessToken, Schemes.Server],
 
-                    TokenTypeHints.AuthorizationCode when !context.Options.DisableTokenStorage
-                        => new[] { Handlers.Server, Formats.AuthorizationCode, Features.ReferenceTokens, Schemes.Server },
-                    TokenTypeHints.AuthorizationCode => new[] { Handlers.Server, Formats.AuthorizationCode, Schemes.Server },
+                        (TokenTypeIdentifiers.Private.AuthorizationCode, true)
+                            => [Handlers.Server, Formats.AuthorizationCode, Features.ReferenceTokens, Schemes.Server],
+                        (TokenTypeIdentifiers.Private.AuthorizationCode, false)
+                            => [Handlers.Server, Formats.AuthorizationCode, Schemes.Server],
 
-                    TokenTypeHints.DeviceCode when !context.Options.DisableTokenStorage
-                        => new[] { Handlers.Server, Formats.DeviceCode, Features.ReferenceTokens, Schemes.Server },
-                    TokenTypeHints.DeviceCode => new[] { Handlers.Server, Formats.DeviceCode, Schemes.Server },
+                        (TokenTypeIdentifiers.Private.DeviceCode, true)
+                            => [Handlers.Server, Formats.DeviceCode, Features.ReferenceTokens, Schemes.Server],
+                        (TokenTypeIdentifiers.Private.DeviceCode, false)
+                            => [Handlers.Server, Formats.DeviceCode, Schemes.Server],
 
-                    TokenTypeHints.RefreshToken when context.Options.UseReferenceRefreshTokens
-                        => new[] { Handlers.Server, Formats.RefreshToken, Features.ReferenceTokens, Schemes.Server },
-                    TokenTypeHints.RefreshToken => new[] { Handlers.Server, Formats.RefreshToken, Schemes.Server },
+                        (TokenTypeIdentifiers.RefreshToken, true)
+                            => [Handlers.Server, Formats.RefreshToken, Features.ReferenceTokens, Schemes.Server],
+                        (TokenTypeIdentifiers.RefreshToken, false)
+                            => [Handlers.Server, Formats.RefreshToken, Schemes.Server],
 
-                    TokenTypeHints.UserCode when !context.Options.DisableTokenStorage
-                        => new[] { Handlers.Server, Formats.UserCode, Features.ReferenceTokens, Schemes.Server },
-                    TokenTypeHints.UserCode => new[] { Handlers.Server, Formats.UserCode, Schemes.Server },
+                        (TokenTypeIdentifiers.Private.UserCode, true)
+                            => [Handlers.Server, Formats.UserCode, Features.ReferenceTokens, Schemes.Server],
+                        (TokenTypeIdentifiers.Private.UserCode, false)
+                            => [Handlers.Server, Formats.UserCode, Schemes.Server],
 
-                    _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0003))
-                });
+                        (TokenTypeIdentifiers.Private.RequestToken, true)
+                            => [Handlers.Server, Formats.RequestToken, Features.ReferenceTokens, Schemes.Server],
+                        (TokenTypeIdentifiers.Private.RequestToken, false)
+                            => [Handlers.Server, Formats.RequestToken, Schemes.Server],
+
+                        _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0003))
+                    });
 
                 using var buffer = new MemoryStream();
                 using var writer = new BinaryWriter(buffer);
 
                 _options.CurrentValue.Formatter.WriteToken(writer, context.Principal);
 
-                context.Token = Base64UrlEncoder.Encode(protector.Protect(buffer.ToArray()));
+                context.Token = Base64Url.EncodeToString(protector.Protect(buffer.ToArray()));
 
-                context.Logger.LogTrace(SR.GetResourceString(SR.ID6013), context.TokenType,
+                context.Logger.LogTrace(6016, SR.GetResourceString(SR.ID6016), context.TokenType,
                     context.Token, context.Principal.Claims);
 
-                return default;
+                return ValueTask.CompletedTask;
             }
         }
     }

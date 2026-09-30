@@ -21,13 +21,10 @@ public static class OpenIddictEntityFrameworkExtensions
     /// </summary>
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictEntityFrameworkBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictEntityFrameworkBuilder"/> instance.</returns>
     public static OpenIddictEntityFrameworkBuilder UseEntityFramework(this OpenIddictCoreBuilder builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         // Since Entity Framework 6.x may be used with databases performing case-insensitive
         // or culture-sensitive comparisons, ensure the additional filtering logic is enforced
@@ -36,23 +33,23 @@ public static class OpenIddictEntityFrameworkExtensions
 
         builder.SetDefaultApplicationEntity<OpenIddictEntityFrameworkApplication>()
                .SetDefaultAuthorizationEntity<OpenIddictEntityFrameworkAuthorization>()
+               .SetDefaultResourceEntity<OpenIddictEntityFrameworkResource>()
                .SetDefaultScopeEntity<OpenIddictEntityFrameworkScope>()
+               .SetDefaultSessionEntity<OpenIddictEntityFrameworkSession>()
                .SetDefaultTokenEntity<OpenIddictEntityFrameworkToken>();
 
-        builder.ReplaceApplicationStoreResolver<OpenIddictEntityFrameworkApplicationStoreResolver>()
-               .ReplaceAuthorizationStoreResolver<OpenIddictEntityFrameworkAuthorizationStoreResolver>()
-               .ReplaceScopeStoreResolver<OpenIddictEntityFrameworkScopeStoreResolver>()
-               .ReplaceTokenStoreResolver<OpenIddictEntityFrameworkTokenStoreResolver>();
+        builder.ReplaceApplicationStore<OpenIddictEntityFrameworkApplication, OpenIddictEntityFrameworkApplicationStore>()
+               .ReplaceAuthorizationStore<OpenIddictEntityFrameworkAuthorization, OpenIddictEntityFrameworkAuthorizationStore>()
+               .ReplaceResourceStore<OpenIddictEntityFrameworkResource, OpenIddictEntityFrameworkResourceStore>()
+               .ReplaceScopeStore<OpenIddictEntityFrameworkScope, OpenIddictEntityFrameworkScopeStore>()
+               .ReplaceSessionStore<OpenIddictEntityFrameworkSession, OpenIddictEntityFrameworkSessionStore>()
+               .ReplaceTokenStore<OpenIddictEntityFrameworkToken, OpenIddictEntityFrameworkTokenStore>();
 
-        builder.Services.TryAddSingleton<OpenIddictEntityFrameworkApplicationStoreResolver.TypeResolutionCache>();
-        builder.Services.TryAddSingleton<OpenIddictEntityFrameworkAuthorizationStoreResolver.TypeResolutionCache>();
-        builder.Services.TryAddSingleton<OpenIddictEntityFrameworkScopeStoreResolver.TypeResolutionCache>();
-        builder.Services.TryAddSingleton<OpenIddictEntityFrameworkTokenStoreResolver.TypeResolutionCache>();
-
-        builder.Services.TryAddScoped(typeof(OpenIddictEntityFrameworkApplicationStore<,,,,>));
-        builder.Services.TryAddScoped(typeof(OpenIddictEntityFrameworkAuthorizationStore<,,,,>));
-        builder.Services.TryAddScoped(typeof(OpenIddictEntityFrameworkScopeStore<,,>));
-        builder.Services.TryAddScoped(typeof(OpenIddictEntityFrameworkTokenStore<,,,,>));
+        // Note: a default context factory is always registered to make debugging easier when
+        // no database context type was configured by the user: the default implementation
+        // registered here is automatically replaced by the UseDbContext<TContext>() API.
+        builder.Services.TryAddScoped<IOpenIddictEntityFrameworkContext>(static provider =>
+            throw new InvalidOperationException(SR.GetResourceString(SR.ID0235)));
 
         return new OpenIddictEntityFrameworkBuilder(builder.Services);
     }
@@ -64,19 +61,12 @@ public static class OpenIddictEntityFrameworkExtensions
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <param name="configuration">The configuration delegate used to configure the Entity Framework 6.x services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictCoreBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictCoreBuilder"/> instance.</returns>
     public static OpenIddictCoreBuilder UseEntityFramework(
         this OpenIddictCoreBuilder builder, Action<OpenIddictEntityFrameworkBuilder> configuration)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(builder.UseEntityFramework());
 

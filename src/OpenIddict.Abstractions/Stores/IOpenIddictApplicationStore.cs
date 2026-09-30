@@ -5,15 +5,17 @@
  */
 
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.IdentityModel.Tokens;
 
 namespace OpenIddict.Abstractions;
 
 /// <summary>
 /// Provides methods allowing to manage the applications stored in a database.
 /// </summary>
-/// <typeparam name="TApplication">The type of the Application entity.</typeparam>
+/// <typeparam name="TApplication">The type of the application entity.</typeparam>
 public interface IOpenIddictApplicationStore<TApplication> where TApplication : class
 {
     /// <summary>
@@ -21,7 +23,7 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// </summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of applications in the database.
     /// </returns>
     ValueTask<long> CountAsync(CancellationToken cancellationToken);
@@ -29,14 +31,18 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// <summary>
     /// Determines the number of applications that match the specified query.
     /// </summary>
+    /// <typeparam name="TState">The state type.</typeparam>
     /// <typeparam name="TResult">The result type.</typeparam>
     /// <param name="query">The query to execute.</param>
+    /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of applications that match the specified query.
     /// </returns>
-    ValueTask<long> CountAsync<TResult>(Func<IQueryable<TApplication>, IQueryable<TResult>> query, CancellationToken cancellationToken);
+    ValueTask<long> CountAsync<TState, TResult>(
+        Func<IQueryable<TApplication>, TState, IQueryable<TResult>> query,
+        TState state, CancellationToken cancellationToken);
 
     /// <summary>
     /// Creates a new application.
@@ -60,7 +66,7 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// <param name="identifier">The unique identifier associated with the application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the client application corresponding to the identifier.
     /// </returns>
     ValueTask<TApplication?> FindByIdAsync(string identifier, CancellationToken cancellationToken);
@@ -71,7 +77,7 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// <param name="identifier">The client identifier associated with the application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the client application corresponding to the identifier.
     /// </returns>
     ValueTask<TApplication?> FindByClientIdAsync(string identifier, CancellationToken cancellationToken);
@@ -79,18 +85,31 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// <summary>
     /// Retrieves all the applications associated with the specified post_logout_redirect_uri.
     /// </summary>
-    /// <param name="address">The post_logout_redirect_uri associated with the applications.</param>
+    /// <param name="uri">The post_logout_redirect_uri associated with the applications.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The client applications corresponding to the specified post_logout_redirect_uri.</returns>
-    IAsyncEnumerable<TApplication> FindByPostLogoutRedirectUriAsync(string address, CancellationToken cancellationToken);
+    IAsyncEnumerable<TApplication> FindByPostLogoutRedirectUriAsync(
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken);
 
     /// <summary>
     /// Retrieves all the applications associated with the specified redirect_uri.
     /// </summary>
-    /// <param name="address">The redirect_uri associated with the applications.</param>
+    /// <param name="uri">The redirect_uri associated with the applications.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The client applications corresponding to the specified redirect_uri.</returns>
-    IAsyncEnumerable<TApplication> FindByRedirectUriAsync(string address, CancellationToken cancellationToken);
+    IAsyncEnumerable<TApplication> FindByRedirectUriAsync(
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retrieves the application type associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns the application type of the application (by default, "web").
+    /// </returns>
+    ValueTask<string?> GetApplicationTypeAsync(TApplication application, CancellationToken cancellationToken);
 
     /// <summary>
     /// Executes the specified query and returns the first element.
@@ -101,7 +120,7 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the first element returned when executing the query.
     /// </returns>
     ValueTask<TResult?> GetAsync<TState, TResult>(
@@ -124,6 +143,12 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// Note: depending on the manager used to create the application,
     /// the client secret may be hashed for security reasons.
     /// </summary>
+    /// <remarks>
+    /// Note: client authentication based on shared secrets is not recommended and should
+    /// only be used for backward compatibility with legacy applications that only support
+    /// client secrets. When possible, consider using public/private key pairs or TLS client
+    /// certificates instead, as these client authentication methods are significantly safer.
+    /// </remarks>
     /// <param name="application">The application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
@@ -188,6 +213,17 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     ValueTask<string?> GetIdAsync(TApplication application, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Retrieves the JSON Web Key Set associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns the JSON Web Key Set associated with the application.
+    /// </returns>
+    ValueTask<JsonWebKeySet?> GetJsonWebKeySetAsync(TApplication application, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Retrieves the permissions associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
@@ -199,7 +235,7 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     ValueTask<ImmutableArray<string>> GetPermissionsAsync(TApplication application, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Retrieves the logout callback addresses associated with an application.
+    /// Retrieves the post-logout redirect URIs associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
@@ -221,7 +257,7 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(TApplication application, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Retrieves the callback addresses associated with an application.
+    /// Retrieves the redirect URIs associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
@@ -241,6 +277,17 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// whose result returns all the requirements associated with the application.
     /// </returns>
     ValueTask<ImmutableArray<string>> GetRequirementsAsync(TApplication application, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retrieves the settings associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns all the settings associated with the application.
+    /// </returns>
+    ValueTask<ImmutableDictionary<string, string>> GetSettingsAsync(TApplication application, CancellationToken cancellationToken);
 
     /// <summary>
     /// Instantiates a new application.
@@ -275,6 +322,15 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
         TState state, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Sets the application type associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="type">The application type associated with the application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
+    ValueTask SetApplicationTypeAsync(TApplication application, string? type, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Sets the client identifier associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
@@ -288,6 +344,12 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// Note: depending on the manager used to create the application,
     /// the client secret may be hashed for security reasons.
     /// </summary>
+    /// <remarks>
+    /// Note: client authentication based on shared secrets is not recommended and should
+    /// only be used for backward compatibility with legacy applications that only support
+    /// client secrets. When possible, consider using public/private key pairs or TLS client
+    /// certificates instead, as these client authentication methods are significantly safer.
+    /// </remarks>
     /// <param name="application">The application.</param>
     /// <param name="secret">The client secret associated with the application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
@@ -332,6 +394,15 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
         ImmutableDictionary<CultureInfo, string> names, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Sets the JSON Web Key Set associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="set">The JSON Web Key Set associated with the application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
+    ValueTask SetJsonWebKeySetAsync(TApplication application, JsonWebKeySet? set, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Sets the permissions associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
@@ -341,14 +412,13 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     ValueTask SetPermissionsAsync(TApplication application, ImmutableArray<string> permissions, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Sets the logout callback addresses associated with an application.
+    /// Sets the post-logout redirect URIs associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
-    /// <param name="addresses">The logout callback addresses associated with the application </param>
+    /// <param name="uris">The post-logout redirect URIs associated with the application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
-    ValueTask SetPostLogoutRedirectUrisAsync(TApplication application,
-        ImmutableArray<string> addresses, CancellationToken cancellationToken);
+    ValueTask SetPostLogoutRedirectUrisAsync(TApplication application, ImmutableArray<string> uris, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sets the additional properties associated with an application.
@@ -361,14 +431,13 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
         ImmutableDictionary<string, JsonElement> properties, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Sets the callback addresses associated with an application.
+    /// Sets the redirect URIs associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
-    /// <param name="addresses">The callback addresses associated with the application </param>
+    /// <param name="uris">The redirect URIs associated with the application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
-    ValueTask SetRedirectUrisAsync(TApplication application,
-        ImmutableArray<string> addresses, CancellationToken cancellationToken);
+    ValueTask SetRedirectUrisAsync(TApplication application, ImmutableArray<string> uris, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sets the requirements associated with an application.
@@ -378,6 +447,16 @@ public interface IOpenIddictApplicationStore<TApplication> where TApplication : 
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
     ValueTask SetRequirementsAsync(TApplication application, ImmutableArray<string> requirements, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sets the settings associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="settings">The settings associated with the application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
+    ValueTask SetSettingsAsync(TApplication application,
+        ImmutableDictionary<string, string> settings, CancellationToken cancellationToken);
 
     /// <summary>
     /// Updates an existing application.

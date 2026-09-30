@@ -21,13 +21,10 @@ public static class OpenIddictValidationOwinExtensions
     /// </summary>
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/> instance.</returns>
     public static OpenIddictValidationOwinBuilder UseOwin(this OpenIddictValidationBuilder builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         // Note: unlike regular OWIN middleware, the OpenIddict validation middleware is registered
         // as a scoped service in the DI container. This allows containers that support middleware
@@ -39,14 +36,15 @@ public static class OpenIddictValidationOwinExtensions
         builder.Services.TryAdd(OpenIddictValidationOwinHandlers.DefaultHandlers.Select(descriptor => descriptor.ServiceDescriptor));
 
         // Register the built-in filters used by the default OpenIddict OWIN validation event handlers.
+        builder.Services.TryAddSingleton<RequireAccessTokenExtractionFromAuthorizationHeaderEnabled>();
+        builder.Services.TryAddSingleton<RequireAccessTokenExtractionFromBodyFormEnabled>();
+        builder.Services.TryAddSingleton<RequireAccessTokenExtractionFromQueryStringEnabled>();
         builder.Services.TryAddSingleton<RequireOwinRequest>();
 
         // Register the option initializers used by the OpenIddict OWIN validation integration services.
         // Note: TryAddEnumerable() is used here to ensure the initializers are only registered once.
-        builder.Services.TryAddEnumerable(new[]
-        {
-            ServiceDescriptor.Singleton<IConfigureOptions<OpenIddictValidationOptions>, OpenIddictValidationOwinConfiguration>()
-        });
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IConfigureOptions<OpenIddictValidationOptions>, OpenIddictValidationOwinConfiguration>());
 
         return new OpenIddictValidationOwinBuilder(builder.Services);
     }
@@ -57,19 +55,12 @@ public static class OpenIddictValidationOwinExtensions
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <param name="configuration">The configuration delegate used to configure the validation services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictValidationBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictValidationBuilder"/> instance.</returns>
     public static OpenIddictValidationBuilder UseOwin(
         this OpenIddictValidationBuilder builder, Action<OpenIddictValidationOwinBuilder> configuration)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(builder.UseOwin());
 

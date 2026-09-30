@@ -5,6 +5,7 @@
  */
 
 using System.Collections.Immutable;
+using System.Net.Http;
 using System.Security.Claims;
 using Xunit;
 using static OpenIddict.Server.OpenIddictServerEvents;
@@ -20,7 +21,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(nameof(HttpMethod.Options))]
     [InlineData(nameof(HttpMethod.Put))]
     [InlineData(nameof(HttpMethod.Trace))]
-    public async Task ExtractUserinfoRequest_UnexpectedMethodReturnsAnError(string method)
+    public async Task ExtractUserInfoRequest_UnexpectedMethodReturnsAnError(string method)
     {
         // Arrange
         await using var server = await CreateServerAsync();
@@ -43,19 +44,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ExtractUserinfoRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ExtractUserInfoRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractUserinfoRequestContext>(builder =>
+            options.AddEventHandler<ExtractUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -71,14 +72,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ExtractUserinfoRequest_AllowsHandlingResponse()
+    public async Task ExtractUserInfoRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractUserinfoRequestContext>(builder =>
+            options.AddEventHandler<ExtractUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -88,7 +89,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -102,19 +103,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ExtractUserinfoRequest_AllowsSkippingHandler()
+    public async Task ExtractUserInfoRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractUserinfoRequestContext>(builder =>
+            options.AddEventHandler<ExtractUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -128,7 +129,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateUserinfoRequest_MissingTokenCausesAnError()
+    public async Task ValidateUserInfoRequest_MissingTokenCausesAnError()
     {
         // Arrange
         await using var server = await CreateServerAsync();
@@ -145,7 +146,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateUserinfoRequest_InvalidTokenCausesAnError()
+    public async Task ValidateUserInfoRequest_InvalidTokenCausesAnError()
     {
         // Arrange
         await using var server = await CreateServerAsync();
@@ -164,7 +165,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateUserinfoRequest_ExpiredTokenCausesAnError()
+    public async Task ValidateUserInfoRequest_ExpiredTokenCausesAnError()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -178,10 +179,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
-                        .SetExpirationDate(DateTimeOffset.UtcNow - TimeSpan.FromDays(1));
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
+                        .SetExpirationDate(TimeProvider.System.GetUtcNow() - TimeSpan.FromDays(1));
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -210,7 +211,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ValidateUserinfoRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ValidateUserInfoRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -224,20 +225,20 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<ValidateUserinfoRequestContext>(builder =>
+            options.AddEventHandler<ValidateUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -256,7 +257,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateUserinfoRequest_AllowsHandlingResponse()
+    public async Task ValidateUserInfoRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -270,15 +271,15 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<ValidateUserinfoRequestContext>(builder =>
+            options.AddEventHandler<ValidateUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -288,7 +289,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -305,7 +306,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateUserinfoRequest_AllowsSkippingHandler()
+    public async Task ValidateUserInfoRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -319,20 +320,20 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<ValidateUserinfoRequestContext>(builder =>
+            options.AddEventHandler<ValidateUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -349,7 +350,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleUserinfoRequest_BasicClaimsAreCorrectlyReturned()
+    public async Task HandleUserInfoRequest_BasicClaimsAreCorrectlyReturned()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -363,11 +364,11 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetPresenters("Fabrikam", "Contoso")
                         .SetClaim(Claims.Subject, "Bob le Magnifique");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -386,11 +387,11 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.Equal(3, response.Count);
         Assert.Equal("http://localhost/", (string?) response[Claims.Issuer]);
         Assert.Equal("Bob le Magnifique", (string?) response[Claims.Subject]);
-        Assert.Equal(new[] { "Fabrikam", "Contoso" }, (string[]?) response[Claims.Audience]);
+        Assert.Equal<IEnumerable<string?>?>(["Fabrikam", "Contoso"], (ImmutableArray<string?>?) response[Claims.Audience]);
     }
 
     [Fact]
-    public async Task HandleUserinfoRequest_NonBasicClaimsAreNotReturnedWhenNoScopeWasGranted()
+    public async Task HandleUserInfoRequest_NonBasicClaimsAreNotReturnedWhenNoScopeWasGranted()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -412,11 +413,11 @@ public abstract partial class OpenIddictServerIntegrationTests
                     identity.AddClaim(Claims.PhoneNumber, "0148962355");
 
                     context.Principal = new ClaimsPrincipal(identity)
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetPresenters("Fabrikam")
-                        .SetScopes(ImmutableArray.Create<string>());
+                        .SetScopes([]);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -439,7 +440,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleUserinfoRequest_ProfileClaimsAreCorrectlyReturned()
+    public async Task HandleUserInfoRequest_ProfileClaimsAreCorrectlyReturned()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -459,12 +460,12 @@ public abstract partial class OpenIddictServerIntegrationTests
                     identity.AddClaim(Claims.Birthdate, "04/09/1933");
 
                     context.Principal = new ClaimsPrincipal(identity)
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetPresenters("Fabrikam")
                         .SetScopes(Scopes.Profile)
                         .SetClaim(Claims.Subject, "Bob le Magnifique");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -486,7 +487,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleUserinfoRequest_EmailClaimIsCorrectlyReturned()
+    public async Task HandleUserInfoRequest_EmailClaimIsCorrectlyReturned()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -500,13 +501,13 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetPresenters("Fabrikam")
                         .SetScopes(Scopes.Email)
                         .SetClaim(Claims.Subject, "Bob le Magnifique")
                         .SetClaim(Claims.Email, "bob@le-magnifique.com");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -526,7 +527,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleUserinfoRequest_PhoneClaimIsCorrectlyReturned()
+    public async Task HandleUserInfoRequest_PhoneClaimIsCorrectlyReturned()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -540,13 +541,13 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetPresenters("Fabrikam")
                         .SetScopes(Scopes.Phone)
                         .SetClaim(Claims.Subject, "Bob le Magnifique")
                         .SetClaim(Claims.PhoneNumber, "0148962355");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -573,7 +574,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task HandleUserinfoRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task HandleUserInfoRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -587,20 +588,20 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<HandleUserinfoRequestContext>(builder =>
+            options.AddEventHandler<HandleUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -619,7 +620,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleUserinfoRequest_AllowsHandlingResponse()
+    public async Task HandleUserInfoRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -633,15 +634,15 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<HandleUserinfoRequestContext>(builder =>
+            options.AddEventHandler<HandleUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -651,7 +652,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -668,7 +669,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleUserinfoRequest_AllowsSkippingHandler()
+    public async Task HandleUserInfoRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -682,20 +683,20 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<HandleUserinfoRequestContext>(builder =>
+            options.AddEventHandler<HandleUserInfoRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -712,7 +713,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyUserinfoResponse_AllowsHandlingResponse()
+    public async Task ApplyUserInfoResponse_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -726,15 +727,15 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<ApplyUserinfoResponseContext>(builder =>
+            options.AddEventHandler<ApplyUserInfoResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -744,7 +745,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -761,7 +762,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyUserinfoResponse_ResponseContainsCustomParameters()
+    public async Task ApplyUserInfoResponse_ResponseContainsCustomParameters()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -775,25 +776,21 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<ApplyUserinfoResponseContext>(builder =>
+            options.AddEventHandler<ApplyUserInfoResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Response["custom_parameter"] = "custom_value";
-                    context.Response["parameter_with_multiple_values"] = new[]
-                    {
-                        "custom_value_1",
-                        "custom_value_2"
-                    };
+                    context.Response["parameter_with_multiple_values"] = new(["custom_value_1", "custom_value_2"]);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -807,6 +804,6 @@ public abstract partial class OpenIddictServerIntegrationTests
 
         // Assert
         Assert.Equal("custom_value", (string?) response["custom_parameter"]);
-        Assert.Equal(new[] { "custom_value_1", "custom_value_2" }, (string[]?) response["parameter_with_multiple_values"]);
+        Assert.Equal<IEnumerable<string?>?>(["custom_value_1", "custom_value_2"], (ImmutableArray<string?>?) response["parameter_with_multiple_values"]);
     }
 }

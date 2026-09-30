@@ -6,6 +6,7 @@
 
 using System.ComponentModel;
 using System.Security.Claims;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace OpenIddict.Server;
@@ -30,13 +31,9 @@ public static partial class OpenIddictServerEvents
         public OpenIddictServerTransaction Transaction { get; }
 
         /// <summary>
-        /// Gets or sets the issuer address associated with the current transaction, if available.
+        /// Gets the cancellation token used to determine if the operation was aborted.
         /// </summary>
-        public Uri? Issuer
-        {
-            get => Transaction.Issuer;
-            set => Transaction.Issuer = value;
-        }
+        public CancellationToken CancellationToken => Transaction.CancellationToken;
 
         /// <summary>
         /// Gets or sets the endpoint type that handled the request, if applicable.
@@ -48,14 +45,39 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets the logger responsible of logging processed operations.
+        /// Gets or sets the request <see cref="Uri"/> of the current transaction, if available.
         /// </summary>
-        public ILogger Logger => Transaction.Logger;
+        public Uri? RequestUri
+        {
+            get => Transaction.RequestUri;
+            set => Transaction.RequestUri = value;
+        }
+
+        /// <summary>
+        /// Gets or sets the base <see cref="Uri"/> of the host, if available.
+        /// </summary>
+        public Uri? BaseUri
+        {
+            get => Transaction.BaseUri;
+            set => Transaction.BaseUri = value;
+        }
+
+        /// <summary>
+        /// Gets the logger responsible for logging processed operations.
+        /// </summary>
+        public ILogger Logger
+            => field ??= Transaction.ServiceProvider.GetRequiredService<ILogger<OpenIddictServerDispatcher>>();
 
         /// <summary>
         /// Gets the OpenIddict server options.
         /// </summary>
         public OpenIddictServerOptions Options => Transaction.Options;
+
+        /// <summary>
+        /// Gets the service provider associated with the current transaction.
+        /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Advanced)]
+        public IServiceProvider ServiceProvider => Transaction.ServiceProvider;
     }
 
     /// <summary>
@@ -123,6 +145,12 @@ public static partial class OpenIddictServerEvents
         /// The authorization server application is responsible for
         /// validating this value to ensure it identifies a registered client.
         /// </summary>
+        /// <remarks>
+        /// Note: client authentication based on shared secrets is not recommended and should
+        /// only be used for backward compatibility with legacy applications that only support
+        /// client secrets. When possible, consider using public/private key pairs or TLS client
+        /// certificates instead, as these client authentication methods are significantly safer.
+        /// </remarks>
         public string? ClientSecret => Transaction.Request?.ClientSecret;
     }
 
@@ -196,7 +224,7 @@ public static partial class OpenIddictServerEvents
         public ClaimsPrincipal? Principal { get; set; }
 
         /// <summary>
-        /// Gets the client identifier, or <c>null</c> if the client application is unknown.
+        /// Gets the client identifier, or <see langword="null"/> if the client application is unknown.
         /// </summary>
         public string? ClientId => Transaction.Request?.ClientId;
     }
@@ -204,7 +232,7 @@ public static partial class OpenIddictServerEvents
     /// <summary>
     /// Represents an event called when processing an incoming request.
     /// </summary>
-    public class ProcessRequestContext : BaseValidatingContext
+    public sealed class ProcessRequestContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessRequestContext"/> class.
@@ -218,7 +246,7 @@ public static partial class OpenIddictServerEvents
     /// <summary>
     /// Represents an event called when processing an errored response.
     /// </summary>
-    public class ProcessErrorContext : BaseRequestContext
+    public sealed class ProcessErrorContext : BaseRequestContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessErrorContext"/> class.
@@ -229,7 +257,7 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets or sets the request or <c>null</c> if it couldn't be extracted.
+        /// Gets or sets the request or <see langword="null"/> if it couldn't be extracted.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -257,7 +285,7 @@ public static partial class OpenIddictServerEvents
         public string? ErrorDescription { get; set; }
 
         /// <summary>
-        /// Gets or sets the error URL returned to the caller.
+        /// Gets or sets the error URI returned to the caller.
         /// </summary>
         public string? ErrorUri { get; set; }
 
@@ -270,7 +298,7 @@ public static partial class OpenIddictServerEvents
     /// <summary>
     /// Represents an event called when processing an authentication operation.
     /// </summary>
-    public class ProcessAuthenticationContext : BaseValidatingContext
+    public sealed class ProcessAuthenticationContext : BaseValidatingClientContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessAuthenticationContext"/> class.
@@ -290,116 +318,405 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether an access token
-        /// must be resolved for the authentication to considered valid.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets the user-defined authentication properties, if available.
         /// </summary>
+        public Dictionary<string, string?> Properties { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an access
+        /// token should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractAccessToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an actor
+        /// token should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractActorToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an authorization
+        /// code should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractAuthorizationCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a client assertion
+        /// token should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractClientAssertion { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a device
+        /// code should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractDeviceCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a generic
+        /// token should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractGenericToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an identity
+        /// token should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractIdentityToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a refresh
+        /// token should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractRefreshToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a request token
+        /// should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractRequestToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a subject
+        /// token should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractSubjectToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a user
+        /// code should be extracted from the current context.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractUserCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an access token
+        /// must be resolved for the authentication to be considered valid.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool RequireAccessToken { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether an authorization code
-        /// must be resolved for the authentication to considered valid.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether an actor token
+        /// must be resolved for the authentication to be considered valid.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RequireActorToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an authorization code
+        /// must be resolved for the authentication to be considered valid.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool RequireAuthorizationCode { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether a device code
-        /// must be resolved for the authentication to considered valid.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether a client assertion
+        /// must be resolved for the authentication to be considered valid.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RequireClientAssertion { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a device code
+        /// must be resolved for the authentication to be considered valid.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool RequireDeviceCode { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether a generic token
-        /// must be resolved for the authentication to considered valid.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// must be resolved for the authentication to be considered valid.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool RequireGenericToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether an identity token
-        /// must be resolved for the authentication to considered valid.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// must be resolved for the authentication to be considered valid.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool RequireIdentityToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether a refresh token
-        /// must be resolved for the authentication to considered valid.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// must be resolved for the authentication to be considered valid.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool RequireRefreshToken { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether a user code
-        /// must be resolved for the authentication to considered valid.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether a request token
+        /// must be resolved for the authentication to be considered valid.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RequireRequestToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a subject token
+        /// must be resolved for the authentication to be considered valid.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RequireSubjectToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a user code
+        /// must be resolved for the authentication to be considered valid.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool RequireUserCode { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether an access token
-        /// should be extracted from the current context and validated.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether the access
+        /// token extracted from the current request should be validated.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool ValidateAccessToken { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether an authorization code
-        /// should be extracted from the current context and validated.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether the actor
+        /// token extracted from the current request should be validated.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ValidateActorToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether the authorization
+        /// code extracted from the current request should be validated.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool ValidateAuthorizationCode { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether a device code
-        /// should be extracted from the current context and validated.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether the client assertion
+        /// token extracted from the current request should be validated.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ValidateClientAssertion { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether the device
+        /// code extracted from the current request should be validated.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool ValidateDeviceCode { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether a generic token
-        /// should be extracted from the current context and validated.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether the generic
+        /// token extracted from the current request should be validated.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool ValidateGenericToken { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether an identity token
-        /// should be extracted from the current context and validated.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether the identity
+        /// token extracted from the current request should be validated.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool ValidateIdentityToken { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether a refresh token
-        /// should be extracted from the current context and validated.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether the refresh
+        /// token extracted from the current request should be validated.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool ValidateRefreshToken { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether a user code
-        /// should be extracted from the current context and validated.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether the request token
+        /// extracted from the current request should be validated.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ValidateRequestToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether the subject
+        /// token extracted from the current request should be validated.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ValidateSubjectToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether the user
+        /// code extracted from the current request should be validated.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool ValidateUserCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid access token
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectAccessToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid actor token
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectActorToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid authorization code
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectAuthorizationCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid client assertion
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectClientAssertion { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid device code
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectDeviceCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid generic token
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectGenericToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid identity token
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectIdentityToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid refresh token
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectRefreshToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid request token
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectRequestToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid subject token
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectSubjectToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid user code
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectUserCode { get; set; }
 
         /// <summary>
         /// Gets or sets the access token to validate, if applicable.
@@ -412,6 +729,21 @@ public static partial class OpenIddictServerEvents
         public ClaimsPrincipal? AccessTokenPrincipal { get; set; }
 
         /// <summary>
+        /// Gets or sets the actor token to validate, if applicable.
+        /// </summary>
+        public string? ActorToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets the type of the actor token, if applicable.
+        /// </summary>
+        public string? ActorTokenType { get; set; }
+
+        /// <summary>
+        /// Gets or sets the principal extracted from the actor token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? ActorTokenPrincipal { get; set; }
+
+        /// <summary>
         /// Gets or sets the authorization code to validate, if applicable.
         /// </summary>
         public string? AuthorizationCode { get; set; }
@@ -420,6 +752,21 @@ public static partial class OpenIddictServerEvents
         /// Gets or sets the principal extracted from the authorization code, if applicable.
         /// </summary>
         public ClaimsPrincipal? AuthorizationCodePrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the client assertion to validate, if applicable.
+        /// </summary>
+        public string? ClientAssertion { get; set; }
+
+        /// <summary>
+        /// Gets or sets the type of the client assertion to validate, if applicable.
+        /// </summary>
+        public string? ClientAssertionType { get; set; }
+
+        /// <summary>
+        /// Gets or sets the principal extracted from the client assertion, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? ClientAssertionPrincipal { get; set; }
 
         /// <summary>
         /// Gets or sets the device code to validate, if applicable.
@@ -467,6 +814,31 @@ public static partial class OpenIddictServerEvents
         public ClaimsPrincipal? RefreshTokenPrincipal { get; set; }
 
         /// <summary>
+        /// Gets or sets the request token to validate, if applicable.
+        /// </summary>
+        public string? RequestToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets the principal extracted from the request token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? RequestTokenPrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the subject token to validate, if applicable.
+        /// </summary>
+        public string? SubjectToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets the type of the subject token, if applicable.
+        /// </summary>
+        public string? SubjectTokenType { get; set; }
+
+        /// <summary>
+        /// Gets or sets the principal extracted from the subject token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? SubjectTokenPrincipal { get; set; }
+
+        /// <summary>
         /// Gets or sets the user code to validate, if applicable.
         /// </summary>
         public string? UserCode { get; set; }
@@ -478,9 +850,9 @@ public static partial class OpenIddictServerEvents
     }
 
     /// <summary>
-    /// Represents an event called when processing a challenge response.
+    /// Represents an event called when processing a challenge operation.
     /// </summary>
-    public class ProcessChallengeContext : BaseValidatingContext
+    public sealed class ProcessChallengeContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessChallengeContext"/> class.
@@ -509,7 +881,12 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets the additional parameters returned to caller.
+        /// Gets the user-defined authentication properties, if available.
+        /// </summary>
+        public Dictionary<string, string?> Properties { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets the additional parameters returned to the caller.
         /// </summary>
         public Dictionary<string, OpenIddictParameter> Parameters { get; } = new(StringComparer.Ordinal);
     }
@@ -517,7 +894,7 @@ public static partial class OpenIddictServerEvents
     /// <summary>
     /// Represents an event called when processing a sign-in response.
     /// </summary>
-    public class ProcessSignInContext : BaseValidatingTicketContext
+    public sealed class ProcessSignInContext : BaseValidatingTicketContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessSignInContext"/> class.
@@ -546,110 +923,163 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets the additional parameters returned to caller.
+        /// Gets the user-defined authentication properties, if available.
+        /// </summary>
+        public Dictionary<string, string?> Properties { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets the additional parameters returned to the caller.
         /// </summary>
         public Dictionary<string, OpenIddictParameter> Parameters { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets or sets a boolean indicating whether an access token
         /// should be generated (and optionally returned to the client).
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool GenerateAccessToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether an authorization code
         /// should be generated (and optionally returned to the client).
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool GenerateAuthorizationCode { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether a device code
         /// should be generated (and optionally returned to the client).
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool GenerateDeviceCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an issued token
+        /// should be generated (and optionally returned to the client).
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool GenerateIssuedToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether an identity token
         /// should be generated (and optionally returned to the client).
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool GenerateIdentityToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether a refresh token
         /// should be generated (and optionally returned to the client).
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool GenerateRefreshToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a request token
+        /// should be generated (and optionally returned to the client).
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool GenerateRequestToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether a user code
         /// should be generated (and optionally returned to the client).
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool GenerateUserCode { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether the generated access token
         /// should be returned to the client application as part of the response.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool IncludeAccessToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether the generated authorization code
         /// should be returned to the client application as part of the response.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool IncludeAuthorizationCode { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether the generated device code
         /// should be returned to the client application as part of the response.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool IncludeDeviceCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether the generated issued token
+        /// should be returned to the client application as part of the response.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool IncludeIssuedToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether the generated identity token
         /// should be returned to the client application as part of the response.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool IncludeIdentityToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether the generated refresh token
         /// should be returned to the client application as part of the response.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool IncludeRefreshToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether the generated request token
+        /// should be returned to the client application as part of the response.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool IncludeRequestToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether the generated user code
         /// should be returned to the client application as part of the response.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool IncludeUserCode { get; set; }
 
         /// <summary>
         /// Gets or sets the generated access token, if applicable.
         /// The access token will only be returned if
-        /// <see cref="IncludeAccessToken"/> is set to <c>true</c>.
+        /// <see cref="IncludeAccessToken"/> is set to <see langword="true"/>.
         /// </summary>
         public string? AccessToken { get; set; }
 
@@ -662,7 +1092,7 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets or sets the generated authorization code, if applicable.
         /// The authorization code will only be returned if
-        /// <see cref="IncludeAuthorizationCode"/> is set to <c>true</c>.
+        /// <see cref="IncludeAuthorizationCode"/> is set to <see langword="true"/>.
         /// </summary>
         public string? AuthorizationCode { get; set; }
 
@@ -675,7 +1105,7 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets or sets the generated device code, if applicable.
         /// The device code will only be returned if
-        /// <see cref="IncludeDeviceCode"/> is set to <c>true</c>.
+        /// <see cref="IncludeDeviceCode"/> is set to <see langword="true"/>.
         /// </summary>
         public string? DeviceCode { get; set; }
 
@@ -686,9 +1116,27 @@ public static partial class OpenIddictServerEvents
         public ClaimsPrincipal? DeviceCodePrincipal { get; set; }
 
         /// <summary>
+        /// Gets or sets the generated issued token, if applicable.
+        /// The issued token will only be returned if
+        /// <see cref="IncludeAccessToken"/> is set to <see langword="true"/>.
+        /// </summary>
+        public string? IssuedToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets the type of the issued token requested by the client, if applicable.
+        /// </summary>
+        public string? IssuedTokenType { get; set; }
+
+        /// <summary>
+        /// Gets or sets the principal containing the claims that
+        /// will be used to create the issued token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? IssuedTokenPrincipal { get; set; }
+
+        /// <summary>
         /// Gets or sets the generated identity token, if applicable.
         /// The identity token will only be returned if
-        /// <see cref="IncludeIdentityToken"/> is set to <c>true</c>.
+        /// <see cref="IncludeIdentityToken"/> is set to <see langword="true"/>.
         /// </summary>
         public string? IdentityToken { get; set; }
 
@@ -701,7 +1149,7 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets or sets the generated refresh token, if applicable.
         /// The refresh token will only be returned if
-        /// <see cref="IncludeRefreshToken"/> is set to <c>true</c>.
+        /// <see cref="IncludeRefreshToken"/> is set to <see langword="true"/>.
         /// </summary>
         public string? RefreshToken { get; set; }
 
@@ -712,9 +1160,22 @@ public static partial class OpenIddictServerEvents
         public ClaimsPrincipal? RefreshTokenPrincipal { get; set; }
 
         /// <summary>
+        /// Gets or sets the generated request token, if applicable.
+        /// The request token will only be returned if
+        /// <see cref="IncludeRequestToken"/> is set to <see langword="true"/>.
+        /// </summary>
+        public string? RequestToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets the principal containing the claims that will be used
+        /// to create the request token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? RequestTokenPrincipal { get; set; }
+
+        /// <summary>
         /// Gets or sets the generated user code, if applicable.
         /// The user code will only be returned if
-        /// <see cref="IncludeUserCode"/> is set to <c>true</c>.
+        /// <see cref="IncludeUserCode"/> is set to <see langword="true"/>.
         /// </summary>
         public string? UserCode { get; set; }
 
@@ -728,7 +1189,7 @@ public static partial class OpenIddictServerEvents
     /// <summary>
     /// Represents an event called when processing a sign-out response.
     /// </summary>
-    public class ProcessSignOutContext : BaseValidatingContext
+    public sealed class ProcessSignOutContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessSignOutContext"/> class.
@@ -757,7 +1218,12 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets the additional parameters returned to caller.
+        /// Gets the user-defined authentication properties, if available.
+        /// </summary>
+        public Dictionary<string, string?> Properties { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets the additional parameters returned to the caller.
         /// </summary>
         public Dictionary<string, OpenIddictParameter> Parameters { get; } = new(StringComparer.Ordinal);
     }

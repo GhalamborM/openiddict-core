@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>$(NetFrameworkTargetFrameworks);$(NetCoreTargetFrameworks)</TargetFrameworks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Description>ASP.NET Core Data Protection integration package for the OpenIddict client services.</Description>
+    <PackageTags>$(PackageTags);client;dataprotection</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OpenIddict.Client\OpenIddict.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="OpenIddict.Abstractions" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictConstants" Static="true" />
+    <Using Include="OpenIddict.Abstractions.OpenIddictResources" Alias="SR" />
+    <Using Include="OpenIddict.Client.OpenIddictClientEvents" Static="true" />
+    <Using Include="OpenIddict.Client.OpenIddictClientHandlers" Static="true" />
+    <Using Include="OpenIddict.Client.OpenIddictClientHandlerFilters" Static="true" />
+    <Using Include="OpenIddict.Client.DataProtection.OpenIddictClientDataProtectionHandlers" Static="true" />
+    <Using Include="OpenIddict.Client.DataProtection.OpenIddictClientDataProtectionHandlerFilters" Static="true" />
+  </ItemGroup>
+
+</Project>

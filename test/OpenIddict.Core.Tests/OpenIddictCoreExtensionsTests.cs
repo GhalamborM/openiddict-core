@@ -1,13 +1,13 @@
-﻿/*
+/*
  * Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
  * See https://github.com/openiddict/openiddict-core for more information concerning
  * the license and the contributors participating to this project.
  */
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Moq;
 using Xunit;
 
 namespace OpenIddict.Core.Tests;
@@ -21,7 +21,7 @@ public class OpenIddictCoreExtensionsTests
         var builder = (OpenIddictBuilder) null!;
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddCore());
+        var exception = Assert.Throws<ArgumentNullException>(builder.AddCore);
 
         Assert.Equal("builder", exception.ParamName);
     }
@@ -67,10 +67,47 @@ public class OpenIddictCoreExtensionsTests
         Assert.Contains(services, service => service.ServiceType == typeof(IOptions<>));
     }
 
+    [Fact]
+    public void AddCore_RegistersBackgroundService()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // Act
+        new OpenIddictBuilder(services).AddCore();
+
+        // Assert
+        Assert.Contains(services, service => service.ServiceType == typeof(IHostedService) &&
+            service.ImplementationType == typeof(OpenIddictCoreBackgroundService) &&
+            service.Lifetime is ServiceLifetime.Singleton);
+    }
+
+    [Fact]
+    public void AddCore_CanBeSafelyInvokedMultipleTimes()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        var builder = new OpenIddictBuilder(services);
+
+        // Act
+        builder.AddCore();
+        builder.AddCore();
+        builder.AddCore();
+
+        // Assert
+        Assert.Single(services, service => service.ServiceType == typeof(IHostedService) &&
+            service.ImplementationType == typeof(OpenIddictCoreBackgroundService));
+
+        Assert.Single(services, service => service.ServiceType == typeof(IPostConfigureOptions<OpenIddictCoreOptions>) &&
+            service.ImplementationType == typeof(OpenIddictCoreConfiguration));
+    }
+
     [Theory]
     [InlineData(typeof(OpenIddictApplicationManager<>))]
     [InlineData(typeof(OpenIddictAuthorizationManager<>))]
+    [InlineData(typeof(OpenIddictResourceManager<>))]
     [InlineData(typeof(OpenIddictScopeManager<>))]
+    [InlineData(typeof(OpenIddictSessionManager<>))]
     [InlineData(typeof(OpenIddictTokenManager<>))]
     public void AddCore_RegistersDefaultManagers(Type type)
     {
@@ -86,28 +123,11 @@ public class OpenIddictCoreExtensionsTests
     }
 
     [Theory]
-    [InlineData(typeof(IOpenIddictApplicationStoreResolver), typeof(OpenIddictApplicationStoreResolver))]
-    [InlineData(typeof(IOpenIddictAuthorizationStoreResolver), typeof(OpenIddictAuthorizationStoreResolver))]
-    [InlineData(typeof(IOpenIddictScopeStoreResolver), typeof(OpenIddictScopeStoreResolver))]
-    [InlineData(typeof(IOpenIddictTokenStoreResolver), typeof(OpenIddictTokenStoreResolver))]
-    public void AddCore_RegistersDefaultResolvers(Type serviceType, Type implementationType)
-    {
-        // Arrange
-        var services = new ServiceCollection();
-        var builder = new OpenIddictBuilder(services);
-
-        // Act
-        builder.AddCore();
-
-        // Assert
-        Assert.Contains(services, service => service.ServiceType == serviceType &&
-                                             service.ImplementationType == implementationType);
-    }
-
-    [Theory]
     [InlineData(typeof(IOpenIddictApplicationManager))]
     [InlineData(typeof(IOpenIddictAuthorizationManager))]
+    [InlineData(typeof(IOpenIddictResourceManager))]
     [InlineData(typeof(IOpenIddictScopeManager))]
+    [InlineData(typeof(IOpenIddictSessionManager))]
     [InlineData(typeof(IOpenIddictTokenManager))]
     public void AddCore_RegistersUntypedProxies(Type type)
     {
@@ -123,7 +143,7 @@ public class OpenIddictCoreExtensionsTests
     }
 
     [Fact]
-    public void AddCore_ResolvingUntypedApplicationManagerThrowsAnExceptionWhenDefaultEntityIsNotSet()
+    public void AddCore_ResolvingUntypedApplicationManagerThrowsAnException()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -135,16 +155,13 @@ public class OpenIddictCoreExtensionsTests
         // Assert
         var provider = services.BuildServiceProvider();
 
-        var exception = Assert.Throws<InvalidOperationException>(delegate
-        {
-            return provider.GetRequiredService<IOpenIddictApplicationManager>();
-        });
+        var exception = Assert.Throws<InvalidOperationException>(provider.GetRequiredService<IOpenIddictApplicationManager>);
 
-        Assert.Equal(SR.GetResourceString(SR.ID0273), exception.Message);
+        Assert.Equal(SR.GetResourceString(SR.ID0472), exception.Message);
     }
 
     [Fact]
-    public void AddCore_ResolvingUntypedAuthorizationManagerThrowsAnExceptionWhenDefaultEntityIsNotSet()
+    public void AddCore_ResolvingUntypedAuthorizationManagerThrowsAnException()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -156,16 +173,13 @@ public class OpenIddictCoreExtensionsTests
         // Assert
         var provider = services.BuildServiceProvider();
 
-        var exception = Assert.Throws<InvalidOperationException>(delegate
-        {
-            return provider.GetRequiredService<IOpenIddictAuthorizationManager>();
-        });
+        var exception = Assert.Throws<InvalidOperationException>(provider.GetRequiredService<IOpenIddictAuthorizationManager>);
 
-        Assert.Equal(SR.GetResourceString(SR.ID0274), exception.Message);
+        Assert.Equal(SR.GetResourceString(SR.ID0472), exception.Message);
     }
 
     [Fact]
-    public void AddCore_ResolvingUntypedScopeManagerThrowsAnExceptionWhenDefaultEntityIsNotSet()
+    public void AddCore_ResolvingUntypedResourceManagerThrowsAnException()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -177,16 +191,13 @@ public class OpenIddictCoreExtensionsTests
         // Assert
         var provider = services.BuildServiceProvider();
 
-        var exception = Assert.Throws<InvalidOperationException>(delegate
-        {
-            return provider.GetRequiredService<IOpenIddictScopeManager>();
-        });
+        var exception = Assert.Throws<InvalidOperationException>(provider.GetRequiredService<IOpenIddictResourceManager>);
 
-        Assert.Equal(SR.GetResourceString(SR.ID0275), exception.Message);
+        Assert.Equal(SR.GetResourceString(SR.ID0472), exception.Message);
     }
 
     [Fact]
-    public void AddCore_ResolvingUntypedTokenManagerThrowsAnExceptionWhenDefaultEntityIsNotSet()
+    public void AddCore_ResolvingUntypedScopeManagerThrowsAnException()
     {
         // Arrange
         var services = new ServiceCollection();
@@ -198,100 +209,44 @@ public class OpenIddictCoreExtensionsTests
         // Assert
         var provider = services.BuildServiceProvider();
 
-        var exception = Assert.Throws<InvalidOperationException>(delegate
-        {
-            return provider.GetRequiredService<IOpenIddictTokenManager>();
-        });
+        var exception = Assert.Throws<InvalidOperationException>(provider.GetRequiredService<IOpenIddictScopeManager>);
 
-        Assert.Equal(SR.GetResourceString(SR.ID0276), exception.Message);
+        Assert.Equal(SR.GetResourceString(SR.ID0472), exception.Message);
     }
 
     [Fact]
-    public void AddCore_ResolvingUntypedApplicationManagerReturnsGenericManager()
+    public void AddCore_ResolvingUntypedSessionManagerThrowsAnException()
     {
         // Arrange
         var services = new ServiceCollection();
         var builder = new OpenIddictBuilder(services);
 
         // Act
-        builder.AddCore(options =>
-        {
-            options.SetDefaultApplicationEntity<OpenIddictApplication>();
-            options.Services.AddSingleton(Mock.Of<IOpenIddictApplicationStore<OpenIddictApplication>>());
-        });
-
-        var provider = services.BuildServiceProvider();
-        var manager = provider.GetRequiredService<IOpenIddictApplicationManager>();
+        builder.AddCore();
 
         // Assert
-        Assert.IsType<OpenIddictApplicationManager<OpenIddictApplication>>(manager);
+        var provider = services.BuildServiceProvider();
+
+        var exception = Assert.Throws<InvalidOperationException>(provider.GetRequiredService<IOpenIddictSessionManager>);
+
+        Assert.Equal(SR.GetResourceString(SR.ID0472), exception.Message);
     }
 
     [Fact]
-    public void AddCore_ResolvingUntypedAuthorizationManagerReturnsGenericManager()
+    public void AddCore_ResolvingUntypedTokenManagerThrowsAnException()
     {
         // Arrange
         var services = new ServiceCollection();
         var builder = new OpenIddictBuilder(services);
 
         // Act
-        builder.AddCore(options =>
-        {
-            options.SetDefaultAuthorizationEntity<OpenIddictAuthorization>();
-            options.Services.AddSingleton(Mock.Of<IOpenIddictAuthorizationStore<OpenIddictAuthorization>>());
-        });
-
-        var provider = services.BuildServiceProvider();
-        var manager = provider.GetRequiredService<IOpenIddictAuthorizationManager>();
+        builder.AddCore();
 
         // Assert
-        Assert.IsType<OpenIddictAuthorizationManager<OpenIddictAuthorization>>(manager);
-    }
-
-    [Fact]
-    public void AddCore_ResolvingUntypedScopeManagerReturnsGenericManager()
-    {
-        // Arrange
-        var services = new ServiceCollection();
-        var builder = new OpenIddictBuilder(services);
-
-        // Act
-        builder.AddCore(options =>
-        {
-            options.SetDefaultScopeEntity<OpenIddictScope>();
-            options.Services.AddSingleton(Mock.Of<IOpenIddictScopeStore<OpenIddictScope>>());
-        });
-
         var provider = services.BuildServiceProvider();
-        var manager = provider.GetRequiredService<IOpenIddictScopeManager>();
 
-        // Assert
-        Assert.IsType<OpenIddictScopeManager<OpenIddictScope>>(manager);
+        var exception = Assert.Throws<InvalidOperationException>(provider.GetRequiredService<IOpenIddictTokenManager>);
+
+        Assert.Equal(SR.GetResourceString(SR.ID0472), exception.Message);
     }
-
-    [Fact]
-    public void AddCore_ResolvingUntypedTokenManagerReturnsGenericManager()
-    {
-        // Arrange
-        var services = new ServiceCollection();
-        var builder = new OpenIddictBuilder(services);
-
-        // Act
-        builder.AddCore(options =>
-        {
-            options.SetDefaultTokenEntity<OpenIddictToken>();
-            options.Services.AddSingleton(Mock.Of<IOpenIddictTokenStore<OpenIddictToken>>());
-        });
-
-        var provider = services.BuildServiceProvider();
-        var manager = provider.GetRequiredService<IOpenIddictTokenManager>();
-
-        // Assert
-        Assert.IsType<OpenIddictTokenManager<OpenIddictToken>>(manager);
-    }
-
-    public class OpenIddictApplication { }
-    public class OpenIddictAuthorization { }
-    public class OpenIddictScope { }
-    public class OpenIddictToken { }
 }

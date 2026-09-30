@@ -20,7 +20,7 @@ public class OpenIddictServerExtensionsTests
         var builder = (OpenIddictBuilder) null!;
 
         // Act and assert
-        var exception = Assert.Throws<ArgumentNullException>(() => builder.AddServer());
+        var exception = Assert.Throws<ArgumentNullException>(builder.AddServer);
 
         Assert.Equal("builder", exception.ParamName);
     }
@@ -79,23 +79,7 @@ public class OpenIddictServerExtensionsTests
         // Assert
         Assert.Contains(services, service => service.ServiceType == typeof(IOpenIddictServerDispatcher) &&
                                              service.ImplementationType == typeof(OpenIddictServerDispatcher) &&
-                                             service.Lifetime == ServiceLifetime.Scoped);
-    }
-    
-    [Fact]
-    public void AddServer_RegistersServerFactory()
-    {
-        // Arrange
-        var services = new ServiceCollection();
-        var builder = new OpenIddictBuilder(services);
-
-        // Act
-        builder.AddServer();
-
-        // Assert
-        Assert.Contains(services, service => service.ServiceType == typeof(IOpenIddictServerFactory) &&
-                                             service.ImplementationType == typeof(OpenIddictServerFactory) &&
-                                             service.Lifetime == ServiceLifetime.Scoped);
+                                             service.Lifetime is ServiceLifetime.Singleton);
     }
 
     public static IEnumerable<object[]> DefaultHandlers
@@ -123,13 +107,14 @@ public class OpenIddictServerExtensionsTests
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireAuthorizationRequest))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireClientIdParameter))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireConfigurationRequest))]
-    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireCryptographyRequest))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireDegradedModeDisabled))]
-    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireDeviceRequest))]
+    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireDeviceAuthorizationRequest))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireEndpointPermissionsEnabled))]
+    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireEndSessionRequest))]
+    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireEndUserVerificationRequest))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireGrantTypePermissionsEnabled))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireIntrospectionRequest))]
-    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireLogoutRequest))]
+    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireJsonWebKeySetRequest))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequirePostLogoutRedirectUriParameter))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireReferenceAccessTokensEnabled))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireReferenceRefreshTokensEnabled))]
@@ -139,8 +124,7 @@ public class OpenIddictServerExtensionsTests
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireScopeValidationEnabled))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireTokenStorageEnabled))]
     [InlineData(typeof(OpenIddictServerHandlerFilters.RequireTokenRequest))]
-    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireUserinfoRequest))]
-    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireVerificationRequest))]
+    [InlineData(typeof(OpenIddictServerHandlerFilters.RequireUserInfoRequest))]
     public void AddServer_RegistersRequiredSingletons(Type type)
     {
         // Arrange
@@ -153,7 +137,7 @@ public class OpenIddictServerExtensionsTests
         // Assert
         Assert.Contains(services, service => service.ServiceType == type &&
                                              service.ImplementationType == type &&
-                                             service.Lifetime == ServiceLifetime.Singleton);
+                                             service.Lifetime is ServiceLifetime.Singleton);
     }
 
     [Fact]
@@ -169,7 +153,7 @@ public class OpenIddictServerExtensionsTests
         // Assert
         var provider = services.BuildServiceProvider();
 
-        var exception = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<OpenIddictServerConfiguration>());
+        var exception = Assert.Throws<InvalidOperationException>(provider.GetRequiredService<OpenIddictServerConfiguration>);
 
         Assert.NotNull(exception);
     }

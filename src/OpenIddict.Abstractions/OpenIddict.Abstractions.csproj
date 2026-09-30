@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;netstandard2.0;netstandard2.1</TargetFrameworks>
+    <TargetFrameworks>$(NetFrameworkTargetFrameworks);$(NetCoreTargetFrameworks)</TargetFrameworks>
     <GenerateResxSourceEmitFormatMethods>true</GenerateResxSourceEmitFormatMethods>
   </PropertyGroup>
 
@@ -12,23 +12,18 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Primitives" />
-    <PackageReference Include="System.Collections.Immutable" />
-    <PackageReference Include="System.Text.Encodings.Web" />
-    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" />
   </ItemGroup>
 
-  <ItemGroup
-    Condition=" ('$(TargetFrameworkIdentifier)' == '.NETFramework') Or
-                ('$(TargetFrameworkIdentifier)' == '.NETStandard' And $([MSBuild]::VersionLessThan($(TargetFrameworkVersion), '2.1'))) ">
+  <ItemGroup Condition=" '$(TargetFrameworkIdentifier)' == '.NETFramework' ">
     <PackageReference Include="Microsoft.Bcl.HashCode" />
+    <PackageReference Include="System.Buffers" />
+    <PackageReference Include="System.Collections.Immutable" />
+    <PackageReference Include="System.Text.Json" />
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TargetFrameworkIdentifier)' == '.NETFramework' ">
     <Reference Include="System.ComponentModel.DataAnnotations" />
-  </ItemGroup>
-
-  <ItemGroup Condition=" '$(TargetFrameworkIdentifier)' == '.NETStandard' ">
-    <PackageReference Include="System.ComponentModel.Annotations" />
   </ItemGroup>
 
   <ItemGroup>

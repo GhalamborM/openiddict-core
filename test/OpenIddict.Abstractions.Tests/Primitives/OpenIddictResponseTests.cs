@@ -5,6 +5,9 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Collections.Immutable;
+using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace OpenIddict.Abstractions.Tests.Primitives;
@@ -73,8 +76,22 @@ public class OpenIddictResponseTests
 
             yield return new object[]
             {
+                /* property: */ nameof(OpenIddictResponse.Iss),
+                /* name: */ Parameters.Iss,
+                /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
+            };
+
+            yield return new object[]
+            {
                 /* property: */ nameof(OpenIddictResponse.RefreshToken),
                 /* name: */ Parameters.RefreshToken,
+                /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
+            };
+
+            yield return new object[]
+            {
+                /* property: */ nameof(OpenIddictResponse.RequestUri),
+                /* name: */ Parameters.RequestUri,
                 /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
             };
 
@@ -105,6 +122,20 @@ public class OpenIddictResponseTests
                 /* name: */ Parameters.UserCode,
                 /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
             };
+
+            yield return new object[]
+            {
+                /* property: */ nameof(OpenIddictResponse.VerificationUri),
+                /* name: */ Parameters.VerificationUri,
+                /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
+            };
+
+            yield return new object[]
+            {
+                /* property: */ nameof(OpenIddictResponse.VerificationUriComplete),
+                /* name: */ Parameters.VerificationUriComplete,
+                /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
+            };
         }
     }
 
@@ -117,7 +148,16 @@ public class OpenIddictResponseTests
         response.SetParameter(name, value);
 
         // Act and assert
-        Assert.Equal(value.Value, typeof(OpenIddictResponse).GetProperty(property)!.GetValue(response));
+        var info = typeof(OpenIddictResponse).GetProperty(property)!;
+        if (typeof(JsonNode).IsAssignableFrom(info.PropertyType))
+        {
+            Assert.True(JsonNode.DeepEquals((JsonNode?) value.GetRawValue(), (JsonNode?) info.GetValue(response)));
+        }
+
+        else
+        {
+            Assert.Equal(value.GetRawValue(), info.GetValue(response));
+        }
     }
 
     [Theory]
@@ -128,7 +168,16 @@ public class OpenIddictResponseTests
         var response = new OpenIddictResponse();
 
         // Act
-        typeof(OpenIddictResponse).GetProperty(property)!.SetValue(response, value.Value);
+        var info = typeof(OpenIddictResponse).GetProperty(property)!;
+        if (typeof(ImmutableArray<string?>).IsAssignableFrom(info.PropertyType))
+        {
+            info.SetValue(response, ImmutableCollectionsMarshal.AsImmutableArray((string?[]?) value.GetRawValue()));
+        }
+
+        else
+        {
+            info.SetValue(response, value.GetRawValue());
+        }
 
         // Assert
         Assert.Equal(value, response.GetParameter(name));

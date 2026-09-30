@@ -1,0 +1,529 @@
+﻿/*
+ * Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+ * See https://github.com/openiddict/openiddict-core for more information concerning
+ * the license and the contributors participating to this project.
+ */
+
+using System.Collections.Immutable;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Net;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Security.Principal;
+
+#if ANDROID
+using Android.Content;
+using NativeUri = Android.Net.Uri;
+#endif
+
+#if MACOS
+using AppKit;
+using NativeWindow = AppKit.NSWindow;
+#elif IOS || MACCATALYST
+using NativeWindow = UIKit.UIWindow;
+#endif
+
+#if NETFRAMEWORK || WINDOWS10_0_17763_0_OR_GREATER
+using Windows.ApplicationModel.Activation;
+using Windows.ApplicationModel;
+using Windows.Foundation.Metadata;
+using Windows.Security.Authentication.Web;
+using Windows.System;
+#endif
+
+namespace OpenIddict.Client.SystemIntegration;
+
+/// <summary>
+/// Exposes companion extensions for the OpenIddict/system integration.
+/// </summary>
+public static class OpenIddictClientSystemIntegrationHelpers
+{
+    /// <summary>
+    /// Gets the <see cref="OpenIddictClientSystemIntegrationPlatformCallback"/> associated with the current context.
+    /// </summary>
+    /// <param name="transaction">The transaction instance.</param>
+    /// <returns>The <see cref="OpenIddictClientSystemIntegrationPlatformCallback"/> instance or <see langword="null"/> if it couldn't be found.</returns>
+    public static OpenIddictClientSystemIntegrationPlatformCallback? GetPlatformCallback(this OpenIddictClientTransaction transaction)
+        => transaction.GetProperty<OpenIddictClientSystemIntegrationPlatformCallback>(typeof(OpenIddictClientSystemIntegrationPlatformCallback).FullName!);
+
+    /// <summary>
+    /// Gets the <see cref="OpenIddictClientSystemIntegrationActivation"/> associated with the current context.
+    /// </summary>
+    /// <param name="transaction">The transaction instance.</param>
+    /// <returns>The <see cref="OpenIddictClientSystemIntegrationActivation"/> instance or <see langword="null"/> if it couldn't be found.</returns>
+    public static OpenIddictClientSystemIntegrationActivation? GetProtocolActivation(this OpenIddictClientTransaction transaction)
+        => transaction.GetProperty<OpenIddictClientSystemIntegrationActivation>(typeof(OpenIddictClientSystemIntegrationActivation).FullName!);
+
+    /// <summary>
+    /// Gets the <see cref="HttpListenerContext"/> associated with the current context.
+    /// </summary>
+    /// <param name="transaction">The transaction instance.</param>
+    /// <returns>The <see cref="HttpListenerContext"/> instance or <see langword="null"/> if it couldn't be found.</returns>
+    public static HttpListenerContext? GetHttpListenerContext(this OpenIddictClientTransaction transaction)
+        => transaction.GetProperty<HttpListenerContext>(typeof(HttpListenerContext).FullName!);
+
+    /// <summary>
+    /// Determines whether the ASWebAuthenticationSession API is supported on this platform.
+    /// </summary>
+    /// <returns><see langword="true"/> if the ASWebAuthenticationSession API is supported, <see langword="false"/> otherwise.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [SupportedOSPlatformGuard("ios12.0")]
+    [SupportedOSPlatformGuard("maccatalyst13.1")]
+    [SupportedOSPlatformGuard("macos10.15")]
+    internal static bool IsASWebAuthenticationSessionSupported()
+#if IOS || MACCATALYST || MACOS
+        => OperatingSystem.IsIOSVersionAtLeast(12)         ||
+           OperatingSystem.IsMacCatalystVersionAtLeast(13) ||
+           OperatingSystem.IsMacOSVersionAtLeast(10, 15);
+#else
+        => false;
+#endif
+
+    /// <summary>
+    /// Determines whether the CustomTabsIntent API is supported on this platform.
+    /// </summary>
+    /// <returns><see langword="true"/> if the CustomTabsIntent API is supported, <see langword="false"/> otherwise.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [SupportedOSPlatformGuard("android21.0")]
+    internal static bool IsCustomTabsIntentSupported()
+#if ANDROID
+        => OperatingSystem.IsAndroidVersionAtLeast(21);
+#else
+        => false;
+#endif
+
+    /// <summary>
+    /// Determines whether the Windows Runtime APIs are supported on this platform.
+    /// </summary>
+    /// <returns><see langword="true"/> if the Windows Runtime APIs are supported, <see langword="false"/> otherwise.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [SupportedOSPlatformGuard("windows10.0.17763")]
+    // Note: as WinRT is only supported on Windows 8 and higher, trying to call any of the
+    // WinRT APIs on previous versions of Windows will typically result in type-load or
+    // type-initialization exceptions. To prevent that, this method acts as a platform
+    // guard that will prevent the WinRT projections from being loaded by the runtime on
+    // platforms that don't support it. Since OpenIddict declares Windows 10 1809 as the
+    // oldest supported version in the package, it is also used for the runtime check.
+    internal static bool IsWindowsRuntimeSupported()
+#if NETFRAMEWORK || WINDOWS10_0_17763_0_OR_GREATER
+        => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763);
+#else
+        => false;
+#endif
+
+    /// <summary>
+    /// Determines whether WinRT app instance activation is supported on this platform.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> if WinRT app instance activation is supported, <see langword="false"/> otherwise.
+    /// </returns>
+    [SupportedOSPlatformGuard("windows10.0.17763")]
+    internal static bool IsAppInstanceActivationSupported()
+    {
+#if NETFRAMEWORK || WINDOWS10_0_17763_0_OR_GREATER
+        return IsWindowsRuntimeSupported() && IsApiPresent();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static bool IsApiPresent() => ApiInformation.IsMethodPresent(
+            typeName           : typeof(AppInstance).FullName,
+            methodName         : nameof(AppInstance.GetActivatedEventArgs),
+            inputParameterCount: 0);
+#else
+        return false;
+#endif
+    }
+
+    /// <summary>
+    /// Determines whether the WinRT URI launcher is supported on this platform.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> if the WinRT URI launcher is supported, <see langword="false"/> otherwise.
+    /// </returns>
+    [SupportedOSPlatformGuard("windows10.0.17763")]
+    internal static bool IsUriLauncherSupported()
+    {
+#if NETFRAMEWORK || WINDOWS10_0_17763_0_OR_GREATER
+        return IsWindowsRuntimeSupported() && IsApiPresent();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static bool IsApiPresent() => ApiInformation.IsMethodPresent(
+            typeName           : typeof(Launcher).FullName,
+            methodName         : nameof(Launcher.LaunchUriAsync),
+            inputParameterCount: 1);
+#else
+        return false;
+#endif
+    }
+
+    /// <summary>
+    /// Determines whether the WinRT web authentication broker is supported on this platform.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> if the WinRT web authentication broker is supported, <see langword="false"/> otherwise.
+    /// </returns>
+    [SupportedOSPlatformGuard("windows10.0.17763")]
+    internal static bool IsWebAuthenticationBrokerSupported()
+    {
+#if NETFRAMEWORK || WINDOWS10_0_17763_0_OR_GREATER
+        return IsWindowsRuntimeSupported() && IsApiPresent();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static bool IsApiPresent() => ApiInformation.IsMethodPresent(
+            typeName           : typeof(WebAuthenticationBroker).FullName,
+            methodName         : nameof(WebAuthenticationBroker.AuthenticateAsync),
+            inputParameterCount: 3);
+#else
+        return false;
+#endif
+    }
+
+    /// <summary>
+    /// Determines whether the specified identity contains an AppContainer
+    /// token, indicating it's running in an AppContainer sandbox.
+    /// </summary>
+    /// <param name="identity">The <see cref="WindowsIdentity"/>.</param>
+    /// <returns>
+    /// <see langword="true"/> if the specified identity contains an
+    /// AppContainer token, <see langword="false"/> otherwise.
+    /// </returns>
+    [SupportedOSPlatform("windows10.0.10240")]
+    internal static unsafe bool HasAppContainerToken(WindowsIdentity identity)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        int* buffer = stackalloc int[1];
+
+        if (!GetTokenInformation(
+            TokenHandle           : identity.Token,
+            TokenInformationClass : /* TokenIsAppContainer */ 29,
+            TokenInformation      : new IntPtr(buffer),
+            TokenInformationLength: sizeof(int),
+            ReturnLength          : out _))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        return *buffer is not 0;
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool GetTokenInformation(
+            IntPtr TokenHandle,
+            uint TokenInformationClass,
+            IntPtr TokenInformation,
+            uint TokenInformationLength,
+            out uint ReturnLength);
+    }
+
+#if IOS || MACCATALYST || MACOS
+    /// <summary>
+    /// Gets a reference to the current <see cref="NativeWindow"/>.
+    /// </summary>
+    /// <returns>The <see cref="NativeWindow"/> or <see langword="null"/> if it couldn't be resolved.</returns>
+    internal static NativeWindow? GetCurrentUIWindow()
+    {
+#if MACOS
+        return NSApplication.SharedApplication.KeyWindow;
+#else
+        var window = GetKeyWindow();
+        if (window is not null && window.WindowLevel == UIWindowLevel.Normal)
+        {
+            return window;
+        }
+
+        return GetWindows()
+            ?.OrderByDescending(static window => window.WindowLevel)
+            ?.Where(static window => window.RootViewController is not null)
+            ?.Where(static window => window.WindowLevel == UIWindowLevel.Normal)
+            ?.FirstOrDefault();
+
+        static UIWindow? GetKeyWindow()
+        {
+            if (OperatingSystem.IsIOSVersionAtLeast(13))
+            {
+                try
+                {
+                    using var scenes = UIApplication.SharedApplication.ConnectedScenes;
+                    var scene = scenes.ToArray<UIWindowScene>().FirstOrDefault();
+
+                    return scene?.Windows.FirstOrDefault();
+                }
+
+                catch (InvalidCastException)
+                {
+                    return null;
+                }
+            }
+
+            return UIApplication.SharedApplication.KeyWindow;
+        }
+
+        static UIWindow[]? GetWindows()
+        {
+            if (OperatingSystem.IsIOSVersionAtLeast(13))
+            {
+                try
+                {
+                    using var scenes = UIApplication.SharedApplication.ConnectedScenes;
+                    var scene = scenes.ToArray<UIWindowScene>().FirstOrDefault();
+
+                    return scene?.Windows;
+                }
+
+                catch (InvalidCastException)
+                {
+                    return null;
+                }
+            }
+
+            return UIApplication.SharedApplication.Windows;
+        }
+#endif
+    }
+#endif
+
+#if NETFRAMEWORK || WINDOWS10_0_17763_0_OR_GREATER
+    /// <summary>
+    /// Resolves the protocol activation using the Windows Runtime APIs, if applicable.
+    /// </summary>
+    /// <returns>
+    /// The <see cref="Uri"/> if the application instance was activated
+    /// via a protocol activation, <see langword="null"/> otherwise.
+    /// </returns>
+    [MethodImpl(MethodImplOptions.NoInlining), SupportedOSPlatform("windows10.0.17763")]
+    internal static Uri? GetProtocolActivationUriWithWindowsRuntime()
+    {
+        try
+        {
+            return AppInstance.GetActivatedEventArgs() is
+                ProtocolActivatedEventArgs args ? args.Uri : null;
+        }
+
+        catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Starts the system browser using the Windows Runtime APIs.
+    /// </summary>
+    /// <param name="uri">The <see cref="Uri"/> to use.</param>
+    /// <returns><see langword="true"/> if the browser could be started, <see langword="false"/> otherwise.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining), SupportedOSPlatform("windows10.0.17763")]
+    internal static async ValueTask<bool> TryLaunchBrowserWithWindowsRuntimeAsync(Uri uri)
+    {
+        // Note: with the materialization of Project Centennial/Desktop Bridge in Windows 10 1607
+        // (also known as Anniversary Update), desktop applications that don't have a package
+        // identity are now allowed to use most of the WinRT APIs. Since OpenIddict's UWP support
+        // is implemented via a net*-windows10.0.17763 TFM (which requires Windows 10 1809), it is assumed
+        // at this point that Launcher.LaunchUriAsync() can be used in both types of applications.
+
+        try
+        {
+            return await Launcher.LaunchUriAsync(uri);
+        }
+
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+#endif
+
+    /// <summary>
+    /// Resolves the protocol activation from the command line arguments, if applicable.
+    /// </summary>
+    /// <returns>
+    /// The <see cref="Uri"/> if the application instance was activated
+    /// via a protocol activation, <see langword="null"/> otherwise.
+    /// </returns>
+    internal static Uri? GetProtocolActivationUriFromCommandLineArguments(ImmutableArray<string> arguments) => arguments switch
+    {
+        // In most cases, the first segment present in the command line arguments contains the path of the
+        // executable, but it's technically possible to start an application in a way that the command line
+        // arguments will never include the executable path. To support both cases, the URI is extracted
+        // from the second segment when 2 segments are present. Otherwise, the first segment is used.
+        //
+        // For more information, see https://devblogs.microsoft.com/oldnewthing/20060515-07/?p=31203.
+
+        [_, string argument] when Uri.TryCreate(argument, UriKind.Absolute, out Uri? uri) && !uri.IsFile => uri,
+        [   string argument] when Uri.TryCreate(argument, UriKind.Absolute, out Uri? uri) && !uri.IsFile => uri,
+
+        _ => null
+    };
+
+    /// <summary>
+    /// Starts the system browser using the operating system shell.
+    /// </summary>
+    /// <param name="uri">The <see cref="Uri"/> to use.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns><see langword="true"/> if the browser could be started, <see langword="false"/> otherwise.</returns>
+    [SupportedOSPlatform("windows")]
+    internal static async ValueTask<bool> TryLaunchBrowserWithShellExecuteAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Run(() => Process.Start(new ProcessStartInfo
+            {
+                FileName = uri.AbsoluteUri,
+                UseShellExecute = true
+            }), cancellationToken);
+
+            return true;
+        }
+
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        catch (Win32Exception exception) when (exception.NativeErrorCode is 5)
+        {
+            return false;
+        }
+    }
+
+#if ANDROID
+    /// <summary>
+    /// Starts the system browser using <see href="NSWorkspace"/>.
+    /// </summary>
+    /// <param name="uri">The <see cref="Uri"/> to use.</param>
+    /// <returns><see langword="true"/> if the browser could be started, <see langword="false"/> otherwise.</returns>
+    [SupportedOSPlatform("android")]
+    internal static bool TryLaunchBrowserWithGenericIntent(Uri uri)
+    {
+        using var intent = new Intent(Intent.ActionView);
+        intent.AddFlags(ActivityFlags.NewTask);
+        intent.SetData(NativeUri.Parse(uri.AbsoluteUri));
+
+        try
+        {
+            Application.Context.StartActivity(intent);
+
+            return true;
+        }
+
+        catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
+        {
+            return false;
+        }
+    }
+#endif
+
+#if MACOS
+    /// <summary>
+    /// Starts the system browser using <see href="NSWorkspace"/>.
+    /// </summary>
+    /// <param name="uri">The <see cref="Uri"/> to use.</param>
+    /// <returns><see langword="true"/> if the browser could be started, <see langword="false"/> otherwise.</returns>
+    [SupportedOSPlatform("macos")]
+    internal static bool TryLaunchBrowserWithNSWorkspace(Uri uri)
+    {
+        try
+        {
+            return NSWorkspace.SharedWorkspace.OpenUrl(new NSUrl(uri.AbsoluteUri));
+        }
+
+        catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
+        {
+            return false;
+        }
+    }
+#endif
+
+#if IOS || MACCATALYST
+    /// <summary>
+    /// Starts the system browser using <see href="UIApplication"/>.
+    /// </summary>
+    /// <param name="uri">The <see cref="Uri"/> to use.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns><see langword="true"/> if the browser could be started, <see langword="false"/> otherwise.</returns>
+    [SupportedOSPlatform("ios")]
+    [SupportedOSPlatform("maccatalyst")]
+    internal static async ValueTask<bool> TryLaunchBrowserWithUIApplicationAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            return await UIApplication.SharedApplication.OpenUrlAsync(new NSUrl(uri.AbsoluteUri), new UIApplicationOpenUrlOptions());
+        }
+
+        catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
+        {
+            return false;
+        }
+    }
+#endif
+
+    /// <summary>
+    /// Starts the system browser using the "open" executable.
+    /// </summary>
+    /// <param name="uri">The <see cref="Uri"/> to use.</param>
+    /// <returns><see langword="true"/> if the browser could be started, <see langword="false"/> otherwise.</returns>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    [SupportedOSPlatform("macos")]
+    internal static async ValueTask<bool> TryLaunchBrowserWithOpenAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Run(() => Process.Start(new ProcessStartInfo
+            {
+                FileName = "/usr/bin/open",
+                Arguments = uri.AbsoluteUri,
+                UseShellExecute = false,
+
+                // Note: children processes always inherit the standard input/output/error handles of the
+                // parent process by default. To ensure the messages logged by the system browser are not
+                // written to the stdio/stderr of the current process, the streams are always redirected.
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true
+            }), cancellationToken);
+
+            return true;
+        }
+
+        catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Starts the system browser using the "xdg-open" executable.
+    /// </summary>
+    /// <param name="uri">The <see cref="Uri"/> to use.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns><see langword="true"/> if the browser could be started, <see langword="false"/> otherwise.</returns>
+    [SupportedOSPlatform("linux")]
+    internal static async ValueTask<bool> TryLaunchBrowserWithXdgOpenAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Run(() => Process.Start(new ProcessStartInfo
+            {
+                FileName = "xdg-open",
+                Arguments = uri.AbsoluteUri,
+                UseShellExecute = false,
+
+                // Note: children processes always inherit the standard input/output/error handles of the
+                // parent process by default. To ensure the messages logged by the system browser are not
+                // written to the stdio/stderr of the current process, the streams are always redirected.
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true
+            }), cancellationToken);
+
+            return true;
+        }
+
+        catch (Exception exception) when (!OpenIddictHelpers.IsFatal(exception))
+        {
+            return false;
+        }
+    }
+}

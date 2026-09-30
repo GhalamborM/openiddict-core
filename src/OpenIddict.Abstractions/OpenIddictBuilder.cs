@@ -5,13 +5,14 @@
  */
 
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// Provides a shared entry point allowing to configure the OpenIddict services.
 /// </summary>
-public class OpenIddictBuilder
+public sealed class OpenIddictBuilder
 {
     /// <summary>
     /// Initializes a new instance of <see cref="OpenIddictBuilder"/>.
@@ -28,7 +29,7 @@ public class OpenIddictBuilder
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public override bool Equals(object? obj) => base.Equals(obj);
+    public override bool Equals([NotNullWhen(true)] object? obj) => base.Equals(obj);
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]

@@ -4,7 +4,6 @@
  * the license and the contributors participating to this project.
  */
 
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 
 namespace OpenIddict.Validation;
@@ -15,7 +14,7 @@ public static partial class OpenIddictValidationEvents
     /// Represents an event called for each request to the configuration endpoint
     /// to give the user code a chance to add parameters to the configuration request.
     /// </summary>
-    public class PrepareConfigurationRequestContext : BaseExternalContext
+    public sealed class PrepareConfigurationRequestContext : BaseExternalContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="PrepareConfigurationRequestContext"/> class.
@@ -39,7 +38,7 @@ public static partial class OpenIddictValidationEvents
     /// Represents an event called for each request to the configuration endpoint
     /// to send the configuration request to the remote authorization server.
     /// </summary>
-    public class ApplyConfigurationRequestContext : BaseExternalContext
+    public sealed class ApplyConfigurationRequestContext : BaseExternalContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ApplyConfigurationRequestContext"/> class.
@@ -63,7 +62,7 @@ public static partial class OpenIddictValidationEvents
     /// Represents an event called for each configuration response
     /// to extract the response parameters from the server response.
     /// </summary>
-    public class ExtractConfigurationResponseContext : BaseExternalContext
+    public sealed class ExtractConfigurationResponseContext : BaseExternalContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ExtractConfigurationResponseContext"/> class.
@@ -83,7 +82,7 @@ public static partial class OpenIddictValidationEvents
         }
 
         /// <summary>
-        /// Gets or sets the response, or <c>null</c> if it wasn't extracted yet.
+        /// Gets or sets the response, or <see langword="null"/> if it wasn't extracted yet.
         /// </summary>
         public OpenIddictResponse? Response
         {
@@ -95,15 +94,14 @@ public static partial class OpenIddictValidationEvents
     /// <summary>
     /// Represents an event called for each configuration response.
     /// </summary>
-    public class HandleConfigurationResponseContext : BaseExternalContext
+    public sealed class HandleConfigurationResponseContext : BaseExternalContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="HandleConfigurationResponseContext"/> class.
         /// </summary>
         public HandleConfigurationResponseContext(OpenIddictValidationTransaction transaction)
             : base(transaction)
-        {
-        }
+            => Configuration = new();
 
         /// <summary>
         /// Gets or sets the request.
@@ -122,23 +120,18 @@ public static partial class OpenIddictValidationEvents
             get => Transaction.Response!;
             set => Transaction.Response = value;
         }
-
-        /// <summary>
-        /// Gets the OpenID Connect configuration.
-        /// </summary>
-        public OpenIdConnectConfiguration Configuration { get; } = new OpenIdConnectConfiguration();
     }
 
     /// <summary>
-    /// Represents an event called for each request to the cryptography endpoint
-    /// to give the user code a chance to add parameters to the cryptography request.
+    /// Represents an event called for each request to the JSON Web Key Set endpoint
+    /// to give the user code a chance to add parameters to the JSON Web Key Set request.
     /// </summary>
-    public class PrepareCryptographyRequestContext : BaseExternalContext
+    public sealed class PrepareJsonWebKeySetRequestContext : BaseExternalContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="PrepareCryptographyRequestContext"/> class.
+        /// Creates a new instance of the <see cref="PrepareJsonWebKeySetRequestContext"/> class.
         /// </summary>
-        public PrepareCryptographyRequestContext(OpenIddictValidationTransaction transaction)
+        public PrepareJsonWebKeySetRequestContext(OpenIddictValidationTransaction transaction)
             : base(transaction)
         {
         }
@@ -154,15 +147,15 @@ public static partial class OpenIddictValidationEvents
     }
 
     /// <summary>
-    /// Represents an event called for each request to the cryptography endpoint
-    /// to send the cryptography request to the remote authorization server.
+    /// Represents an event called for each request to the JSON Web Key Set endpoint
+    /// to send the JSON Web Key Set request to the remote authorization server.
     /// </summary>
-    public class ApplyCryptographyRequestContext : BaseExternalContext
+    public sealed class ApplyJsonWebKeySetRequestContext : BaseExternalContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ApplyCryptographyRequestContext"/> class.
+        /// Creates a new instance of the <see cref="ApplyJsonWebKeySetRequestContext"/> class.
         /// </summary>
-        public ApplyCryptographyRequestContext(OpenIddictValidationTransaction transaction)
+        public ApplyJsonWebKeySetRequestContext(OpenIddictValidationTransaction transaction)
             : base(transaction)
         {
         }
@@ -178,15 +171,15 @@ public static partial class OpenIddictValidationEvents
     }
 
     /// <summary>
-    /// Represents an event called for each cryptography response
+    /// Represents an event called for each JSON Web Key Set response
     /// to extract the response parameters from the server response.
     /// </summary>
-    public class ExtractCryptographyResponseContext : BaseExternalContext
+    public sealed class ExtractJsonWebKeySetResponseContext : BaseExternalContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ExtractCryptographyResponseContext"/> class.
+        /// Creates a new instance of the <see cref="ExtractJsonWebKeySetResponseContext"/> class.
         /// </summary>
-        public ExtractCryptographyResponseContext(OpenIddictValidationTransaction transaction)
+        public ExtractJsonWebKeySetResponseContext(OpenIddictValidationTransaction transaction)
             : base(transaction)
         {
         }
@@ -201,7 +194,7 @@ public static partial class OpenIddictValidationEvents
         }
 
         /// <summary>
-        /// Gets or sets the response, or <c>null</c> if it wasn't extracted yet.
+        /// Gets or sets the response, or <see langword="null"/> if it wasn't extracted yet.
         /// </summary>
         public OpenIddictResponse? Response
         {
@@ -211,14 +204,14 @@ public static partial class OpenIddictValidationEvents
     }
 
     /// <summary>
-    /// Represents an event called for each cryptography response.
+    /// Represents an event called for each JSON Web Key Set response.
     /// </summary>
-    public class HandleCryptographyResponseContext : BaseExternalContext
+    public sealed class HandleJsonWebKeySetResponseContext : BaseExternalContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="HandleCryptographyResponseContext"/> class.
+        /// Creates a new instance of the <see cref="HandleJsonWebKeySetResponseContext"/> class.
         /// </summary>
-        public HandleCryptographyResponseContext(OpenIddictValidationTransaction transaction)
+        public HandleJsonWebKeySetResponseContext(OpenIddictValidationTransaction transaction)
             : base(transaction)
         {
         }

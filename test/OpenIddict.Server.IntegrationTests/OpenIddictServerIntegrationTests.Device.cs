@@ -5,6 +5,7 @@
  */
 
 using System.Collections.Immutable;
+using System.Net.Http;
 using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
@@ -23,7 +24,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(nameof(HttpMethod.Options))]
     [InlineData(nameof(HttpMethod.Put))]
     [InlineData(nameof(HttpMethod.Trace))]
-    public async Task ExtractDeviceRequest_UnexpectedMethodReturnsAnError(string method)
+    public async Task ExtractDeviceAuthorizationRequest_UnexpectedMethodReturnsAnError(string method)
     {
         // Arrange
         await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
@@ -46,19 +47,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ExtractDeviceRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ExtractDeviceAuthorizationRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractDeviceRequestContext>(builder =>
+            options.AddEventHandler<ExtractDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -74,14 +75,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ExtractDeviceRequest_AllowsHandlingResponse()
+    public async Task ExtractDeviceAuthorizationRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractDeviceRequestContext>(builder =>
+            options.AddEventHandler<ExtractDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -91,7 +92,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -105,19 +106,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ExtractDeviceRequest_AllowsSkippingHandler()
+    public async Task ExtractDeviceAuthorizationRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractDeviceRequestContext>(builder =>
+            options.AddEventHandler<ExtractDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -131,7 +132,99 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_MissingClientIdCausesAnError()
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenClientAssertionIsSpecifiedWithoutType()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/device", new OpenIddictRequest
+        {
+            ClientAssertion = "2YotnFZFEjr1zCsicMWpAA",
+            ClientAssertionType = null,
+            ClientId = "Fabrikam"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.FormatID2037(Parameters.ClientAssertionType, Parameters.ClientAssertion), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2037), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenClientAssertionTypeIsSpecifiedWithoutAssertion()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/device", new OpenIddictRequest
+        {
+            ClientAssertion = null,
+            ClientAssertionType = ClientAssertionTypes.JwtBearer,
+            ClientId = "Fabrikam"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.FormatID2037(Parameters.ClientAssertion, Parameters.ClientAssertionType), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2037), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenUnsupportedClientAssertionTypeIsSpecified()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.Configure(options => options.ClientAuthenticationMethods.Remove(ClientAuthenticationMethods.PrivateKeyJwt));
+            options.Configure(options => options.ClientAssertionTypes.Remove(ClientAssertionTypes.JwtBearer));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/device", new OpenIddictRequest
+        {
+            ClientAssertion = "2YotnFZFEjr1zCsicMWpAA",
+            ClientAssertionType = ClientAssertionTypes.JwtBearer,
+            ClientId = "Fabrikam"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidClient, response.Error);
+        Assert.Equal(SR.FormatID2032(Parameters.ClientAssertionType), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2032), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenMultipleCredentialsAreSpecified()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/device", new OpenIddictRequest
+        {
+            ClientAssertion = "2YotnFZFEjr1zCsicMWpAA",
+            ClientAssertionType = ClientAssertionTypes.JwtBearer,
+            ClientId = "Fabrikam",
+            ClientSecret = "7Fjfp0ZBr1KtDRbnfVdmIw"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.GetResourceString(SR.ID2087), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2087), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateDeviceAuthorizationRequest_MissingClientIdCausesAnError()
     {
         // Arrange
         await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
@@ -150,7 +243,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_RequestWithOfflineAccessScopeIsRejectedWhenRefreshTokenFlowIsDisabled()
+    public async Task ValidateDeviceAuthorizationRequest_RequestWithOfflineAccessScopeIsRejectedWhenRefreshTokenFlowIsDisabled()
     {
         // Arrange
         var application = new OpenIddictApplication();
@@ -185,7 +278,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_RequestIsRejectedWhenUnregisteredScopeIsSpecified()
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenUnregisteredScopeIsSpecified()
     {
         // Arrange
         var application = new OpenIddictApplication();
@@ -226,10 +319,11 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_RequestIsValidatedWhenScopeRegisteredInOptionsIsSpecified()
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsValidatedWhenScopeRegisteredInOptionsIsSpecified()
     {
         // Arrange
         var application = new OpenIddictApplication();
+        var token = new OpenIddictToken();
 
         await using var server = await CreateServerAsync(options =>
         {
@@ -240,20 +334,34 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                 mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
                     .ReturnsAsync(true);
+
+                mock.Setup(manager => manager.GetSettingsAsync(application, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(ImmutableDictionary.Create<string, string>(StringComparer.Ordinal));
+            }));
+
+            options.Services.AddSingleton(CreateTokenManager(mock =>
+            {
+                mock.Setup(manager => manager.CreateAsync(It.IsAny<OpenIddictTokenDescriptor>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(token);
+
+                mock.Setup(manager => manager.GetIdAsync(token, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync("3E228451-1555-46F7-A471-951EFBA23A56");
+
+                mock.Setup(manager => manager.FindByIdAsync("3E228451-1555-46F7-A471-951EFBA23A56", It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(token);
             }));
 
             options.RegisterScopes("registered_scope");
             options.SetRevocationEndpointUris(Array.Empty<Uri>());
             options.DisableAuthorizationStorage();
-            options.DisableTokenStorage();
             options.DisableSlidingRefreshTokenExpiration();
 
-            options.AddEventHandler<HandleDeviceRequestContext>(builder =>
+            options.AddEventHandler<HandleDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity());
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -275,11 +383,12 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_RequestIsValidatedWhenRegisteredScopeIsSpecified()
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsValidatedWhenRegisteredScopeIsSpecified()
     {
         // Arrange
         var application = new OpenIddictApplication();
         var scope = new OpenIddictScope();
+        var token = new OpenIddictToken();
 
         var manager = CreateScopeManager(mock =>
         {
@@ -301,22 +410,36 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                 mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
                     .ReturnsAsync(true);
+
+                mock.Setup(manager => manager.GetSettingsAsync(application, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(ImmutableDictionary.Create<string, string>(StringComparer.Ordinal));
+            }));
+
+            options.Services.AddSingleton(CreateTokenManager(mock =>
+            {
+                mock.Setup(manager => manager.CreateAsync(It.IsAny<OpenIddictTokenDescriptor>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(token);
+
+                mock.Setup(manager => manager.GetIdAsync(token, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync("3E228451-1555-46F7-A471-951EFBA23A56");
+
+                mock.Setup(manager => manager.FindByIdAsync("3E228451-1555-46F7-A471-951EFBA23A56", It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(token);
             }));
 
             options.RegisterScopes("scope_registered_in_options");
             options.SetRevocationEndpointUris(Array.Empty<Uri>());
             options.DisableAuthorizationStorage();
-            options.DisableTokenStorage();
             options.DisableSlidingRefreshTokenExpiration();
 
             options.Services.AddSingleton(manager);
 
-            options.AddEventHandler<HandleDeviceRequestContext>(builder =>
+            options.AddEventHandler<HandleDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity());
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -338,7 +461,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_RequestIsRejectedWhenClientCannotBeFound()
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenClientCannotBeFound()
     {
         // Arrange
         var manager = CreateApplicationManager(mock =>
@@ -369,125 +492,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_ClientSecretCannotBeUsedByPublicClients()
-    {
-        // Arrange
-        var application = new OpenIddictApplication();
-
-        var manager = CreateApplicationManager(mock =>
-        {
-            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(application);
-
-            mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
-        });
-
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.Services.AddSingleton(manager);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/device", new OpenIddictRequest
-        {
-            ClientId = "Fabrikam",
-            ClientSecret = "7Fjfp0ZBr1KtDRbnfVdmIw"
-        });
-
-        // Assert
-        Assert.Equal(Errors.InvalidClient, response.Error);
-        Assert.Equal(SR.FormatID2053(Parameters.ClientSecret), response.ErrorDescription);
-        Assert.Equal(SR.FormatID8000(SR.ID2053), response.ErrorUri);
-
-        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task ValidateDeviceRequest_ClientSecretIsRequiredForNonPublicClients()
-    {
-        // Arrange
-        var application = new OpenIddictApplication();
-
-        var manager = CreateApplicationManager(mock =>
-        {
-            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(application);
-
-            mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-        });
-
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.Services.AddSingleton(manager);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/device", new OpenIddictRequest
-        {
-            ClientId = "Fabrikam",
-            ClientSecret = null
-        });
-
-        // Assert
-        Assert.Equal(Errors.InvalidClient, response.Error);
-        Assert.Equal(SR.FormatID2054(Parameters.ClientSecret), response.ErrorDescription);
-        Assert.Equal(SR.FormatID8000(SR.ID2054), response.ErrorUri);
-
-        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task ValidateDeviceRequest_RequestIsRejectedWhenClientCredentialsAreInvalid()
-    {
-        // Arrange
-        var application = new OpenIddictApplication();
-
-        var manager = CreateApplicationManager(mock =>
-        {
-            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(application);
-
-            mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-
-            mock.Setup(manager => manager.ValidateClientSecretAsync(application, "7Fjfp0ZBr1KtDRbnfVdmIw", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-        });
-
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.Services.AddSingleton(manager);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/device", new OpenIddictRequest
-        {
-            ClientId = "Fabrikam",
-            ClientSecret = "7Fjfp0ZBr1KtDRbnfVdmIw"
-        });
-
-        // Assert
-        Assert.Equal(Errors.InvalidClient, response.Error);
-        Assert.Equal(SR.GetResourceString(SR.ID2055), response.ErrorDescription);
-        Assert.Equal(SR.FormatID8000(SR.ID2055), response.ErrorUri);
-
-        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.ValidateClientSecretAsync(application, "7Fjfp0ZBr1KtDRbnfVdmIw", It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task ValidateDeviceRequest_RequestIsRejectedWhenEndpointPermissionIsNotGranted()
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenEndpointPermissionIsNotGranted()
     {
         // Arrange
         var application = new OpenIddictApplication();
@@ -501,7 +506,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                 .ReturnsAsync(true);
 
             mock.Setup(manager => manager.HasPermissionAsync(application,
-                Permissions.Endpoints.Device, It.IsAny<CancellationToken>()))
+                Permissions.Endpoints.DeviceAuthorization, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
         });
 
@@ -527,11 +532,11 @@ public abstract partial class OpenIddictServerIntegrationTests
 
         Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
         Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(application,
-            Permissions.Endpoints.Device, It.IsAny<CancellationToken>()), Times.Once());
+            Permissions.Endpoints.DeviceAuthorization, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_RequestIsRejectedWhenGrantTypePermissionIsNotGranted()
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenGrantTypePermissionIsNotGranted()
     {
         // Arrange
         var application = new OpenIddictApplication();
@@ -575,7 +580,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_RequestWithOfflineAccessScopeIsRejectedWhenRefreshTokenPermissionIsNotGranted()
+    public async Task ValidateDeviceAuthorizationRequest_RequestWithOfflineAccessScopeIsRejectedWhenRefreshTokenPermissionIsNotGranted()
     {
         // Arrange
         var application = new OpenIddictApplication();
@@ -623,7 +628,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_RequestIsRejectedWhenScopePermissionIsNotGranted()
+    public async Task ValidateDeviceAuthorizationRequest_RequestIsRejectedWhenScopePermissionIsNotGranted()
     {
         // Arrange
         var application = new OpenIddictApplication();
@@ -685,19 +690,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ValidateDeviceRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ValidateDeviceAuthorizationRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateDeviceRequestContext>(builder =>
+            options.AddEventHandler<ValidateDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -716,14 +721,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_AllowsHandlingResponse()
+    public async Task ValidateDeviceAuthorizationRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateDeviceRequestContext>(builder =>
+            options.AddEventHandler<ValidateDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -733,7 +738,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -750,19 +755,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateDeviceRequest_AllowsSkippingHandler()
+    public async Task ValidateDeviceAuthorizationRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractDeviceRequestContext>(builder =>
+            options.AddEventHandler<ExtractDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -786,19 +791,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task HandleDeviceRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task HandleDeviceAuthorizationRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleDeviceRequestContext>(builder =>
+            options.AddEventHandler<HandleDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -817,14 +822,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleDeviceRequest_AllowsHandlingResponse()
+    public async Task HandleDeviceAuthorizationRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateDeviceRequestContext>(builder =>
+            options.AddEventHandler<ValidateDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -834,7 +839,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -851,19 +856,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleDeviceRequest_AllowsSkippingHandler()
+    public async Task HandleDeviceAuthorizationRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateDeviceRequestContext>(builder =>
+            options.AddEventHandler<ValidateDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -880,7 +885,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleDeviceRequest_ResponseContainsCustomParameters()
+    public async Task HandleDeviceAuthorizationRequest_ResponseContainsCustomParameters()
     {
         // Arrange
         var application = new OpenIddictApplication();
@@ -898,19 +903,15 @@ public abstract partial class OpenIddictServerIntegrationTests
 
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleDeviceRequestContext>(builder =>
+            options.AddEventHandler<HandleDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity());
 
                     context.Parameters["custom_parameter"] = "custom_value";
-                    context.Parameters["parameter_with_multiple_values"] = new[]
-                    {
-                        "custom_value_1",
-                        "custom_value_2"
-                    };
+                    context.Parameters["parameter_with_multiple_values"] = new(["custom_value_1", "custom_value_2"]);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -928,26 +929,26 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.Null(response.ErrorUri);
         Assert.NotNull(response.DeviceCode);
         Assert.Equal("custom_value", (string?) response["custom_parameter"]);
-        Assert.Equal(new[] { "custom_value_1", "custom_value_2" }, (string[]?) response["parameter_with_multiple_values"]);
+        Assert.Equal<IEnumerable<string?>?>(["custom_value_1", "custom_value_2"], (ImmutableArray<string?>?) response["parameter_with_multiple_values"]);
     }
 
     [Fact]
-    public async Task ApplyDeviceResponse_AllowsHandlingResponse()
+    public async Task ApplyDeviceAuthorizationResponse_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleDeviceRequestContext>(builder =>
+            options.AddEventHandler<HandleDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity());
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyDeviceResponseContext>(builder =>
+            options.AddEventHandler<ApplyDeviceAuthorizationResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -957,7 +958,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -974,32 +975,28 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyDeviceResponse_ResponseContainsCustomParameters()
+    public async Task ApplyDeviceAuthorizationResponse_ResponseContainsCustomParameters()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleDeviceRequestContext>(builder =>
+            options.AddEventHandler<HandleDeviceAuthorizationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity());
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyDeviceResponseContext>(builder =>
+            options.AddEventHandler<ApplyDeviceAuthorizationResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Response["custom_parameter"] = "custom_value";
-                    context.Response["parameter_with_multiple_values"] = new[]
-                    {
-                        "custom_value_1",
-                        "custom_value_2"
-                    };
+                    context.Response["parameter_with_multiple_values"] = new(["custom_value_1", "custom_value_2"]);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1013,7 +1010,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
         // Assert
         Assert.Equal("custom_value", (string?) response["custom_parameter"]);
-        Assert.Equal(new[] { "custom_value_1", "custom_value_2" }, (string[]?) response["parameter_with_multiple_values"]);
+        Assert.Equal<IEnumerable<string?>?>(["custom_value_1", "custom_value_2"], (ImmutableArray<string?>?) response["parameter_with_multiple_values"]);
     }
 
     [Theory]
@@ -1022,7 +1019,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(nameof(HttpMethod.Options))]
     [InlineData(nameof(HttpMethod.Put))]
     [InlineData(nameof(HttpMethod.Trace))]
-    public async Task ExtractVerificationRequest_UnexpectedMethodReturnsAnError(string method)
+    public async Task ExtractEndUserVerificationRequest_UnexpectedMethodReturnsAnError(string method)
     {
         // Arrange
         await using var server = await CreateServerAsync();
@@ -1045,19 +1042,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ExtractVerificationRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ExtractEndUserVerificationRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractVerificationRequestContext>(builder =>
+            options.AddEventHandler<ExtractEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1073,14 +1070,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ExtractVerificationRequest_AllowsHandlingResponse()
+    public async Task ExtractEndUserVerificationRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractVerificationRequestContext>(builder =>
+            options.AddEventHandler<ExtractEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -1090,7 +1087,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1104,19 +1101,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ExtractVerificationRequest_AllowsSkippingHandler()
+    public async Task ExtractEndUserVerificationRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractVerificationRequestContext>(builder =>
+            options.AddEventHandler<ExtractEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1137,19 +1134,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ValidateVerificationRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ValidateEndUserVerificationRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateVerificationRequestContext>(builder =>
+            options.AddEventHandler<ValidateEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1165,14 +1162,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateVerificationRequest_AllowsHandlingResponse()
+    public async Task ValidateEndUserVerificationRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateVerificationRequestContext>(builder =>
+            options.AddEventHandler<ValidateEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -1182,7 +1179,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1196,19 +1193,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateVerificationRequest_AllowsSkippingHandler()
+    public async Task ValidateEndUserVerificationRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateVerificationRequestContext>(builder =>
+            options.AddEventHandler<ValidateEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1229,19 +1226,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task HandleVerificationRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task HandleEndUserVerificationRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
+            options.AddEventHandler<HandleEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1257,14 +1254,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleVerificationRequest_AllowsHandlingResponse()
+    public async Task HandleEndUserVerificationRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
+            options.AddEventHandler<HandleEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -1274,7 +1271,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1288,19 +1285,19 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleVerificationRequest_AllowsSkippingHandler()
+    public async Task HandleEndUserVerificationRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
+            options.AddEventHandler<HandleEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1314,7 +1311,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleVerificationRequest_ResponseContainsCustomParameters()
+    public async Task HandleEndUserVerificationRequest_ResponseContainsCustomParameters()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -1326,40 +1323,36 @@ public abstract partial class OpenIddictServerIntegrationTests
                 builder.UseInlineHandler(context =>
                 {
                     Assert.Equal("WDJB-MJHT", context.Token);
-                    Assert.Equal(new[] { TokenTypeHints.UserCode }, context.ValidTokenTypes);
+                    Assert.Equal([TokenTypeIdentifiers.Private.UserCode], context.ValidTokenTypes);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity())
-                        .SetTokenType(TokenTypeHints.UserCode);
+                        .SetTokenType(TokenTypeIdentifiers.Private.UserCode);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
             });
 
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
+            options.AddEventHandler<HandleEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
                         .SetClaim(Claims.Subject, "Bob le Magnifique");
 
                     context.Parameters["custom_parameter"] = "custom_value";
-                    context.Parameters["parameter_with_multiple_values"] = new[]
-                    {
-                        "custom_value_1",
-                        "custom_value_2"
-                    };
+                    context.Parameters["parameter_with_multiple_values"] = new(["custom_value_1", "custom_value_2"]);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyVerificationResponseContext>(builder =>
+            options.AddEventHandler<ApplyEndUserVerificationResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", context.Response);
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1373,26 +1366,26 @@ public abstract partial class OpenIddictServerIntegrationTests
 
         // Assert
         Assert.Equal("custom_value", (string?) response["custom_parameter"]);
-        Assert.Equal(new[] { "custom_value_1", "custom_value_2" }, (string[]?) response["parameter_with_multiple_values"]);
+        Assert.Equal<IEnumerable<string?>?>(["custom_value_1", "custom_value_2"], (ImmutableArray<string?>?) response["parameter_with_multiple_values"]);
     }
 
     [Fact]
-    public async Task ApplyVerificationResponse_AllowsHandlingResponse()
+    public async Task ApplyEndUserVerificationResponse_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
+            options.AddEventHandler<HandleEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyVerificationResponseContext>(builder =>
+            options.AddEventHandler<ApplyEndUserVerificationResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -1402,7 +1395,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1416,27 +1409,27 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyVerificationResponse_ResponseContainsCustomParameters()
+    public async Task ApplyEndUserVerificationResponse_ResponseContainsCustomParameters()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleVerificationRequestContext>(builder =>
+            options.AddEventHandler<HandleEndUserVerificationRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyVerificationResponseContext>(builder =>
+            options.AddEventHandler<ApplyEndUserVerificationResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Response["custom_parameter"] = "custom_value";
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 

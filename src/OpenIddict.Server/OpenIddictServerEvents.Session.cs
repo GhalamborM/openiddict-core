@@ -4,26 +4,29 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Diagnostics.CodeAnalysis;
+using System.Security.Claims;
+
 namespace OpenIddict.Server;
 
 public static partial class OpenIddictServerEvents
 {
     /// <summary>
-    /// Represents an event called for each request to the logout endpoint to give the user code
-    /// a chance to manually extract the logout request from the ambient HTTP context.
+    /// Represents an event called for each request to the end session endpoint to give the user code
+    /// a chance to manually extract the end session request from the ambient HTTP context.
     /// </summary>
-    public class ExtractLogoutRequestContext : BaseValidatingContext
+    public sealed class ExtractEndSessionRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ExtractLogoutRequestContext"/> class.
+        /// Creates a new instance of the <see cref="ExtractEndSessionRequestContext"/> class.
         /// </summary>
-        public ExtractLogoutRequestContext(OpenIddictServerTransaction transaction)
+        public ExtractEndSessionRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if wasn't extracted yet.
+        /// Gets or sets the request, or <see langword="null"/> if wasn't extracted yet.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -33,15 +36,15 @@ public static partial class OpenIddictServerEvents
     }
 
     /// <summary>
-    /// Represents an event called for each request to the logout endpoint
+    /// Represents an event called for each request to the end session endpoint
     /// to determine if the request is valid and should continue to be processed.
     /// </summary>
-    public class ValidateLogoutRequestContext : BaseValidatingContext
+    public sealed class ValidateEndSessionRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ValidateLogoutRequestContext"/> class.
+        /// Creates a new instance of the <see cref="ValidateEndSessionRequestContext"/> class.
         /// </summary>
-        public ValidateLogoutRequestContext(OpenIddictServerTransaction transaction)
+        public ValidateEndSessionRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
             // Infer the post_logout_redirect_uri from the value specified by the client application.
             => PostLogoutRedirectUri = Request?.PostLogoutRedirectUri;
@@ -56,43 +59,58 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
+        /// Gets the client_id specified by the client application, if available.
+        /// </summary>
+        public string? ClientId => Request?.ClientId;
+
+        /// <summary>
         /// Gets the post_logout_redirect_uri specified by the client application.
         /// </summary>
-        public string? PostLogoutRedirectUri { get; private set; }
+        [StringSyntax(StringSyntaxAttribute.Uri)]
+        public string? PostLogoutRedirectUri { get; internal set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted
+        /// from the identity token hint, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? IdentityTokenHintPrincipal { get; set; }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted from the
+        /// request token, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? RequestTokenPrincipal { get; set; }
 
         /// <summary>
         /// Populates the <see cref="PostLogoutRedirectUri"/> property with the specified redirect_uri.
         /// </summary>
-        /// <param name="address">The post_logout_redirect_uri to use when redirecting the user agent.</param>
-        public void SetPostLogoutRedirectUri(string address)
+        /// <param name="uri">The post_logout_redirect_uri to use when redirecting the user agent.</param>
+        public void SetPostLogoutRedirectUri([StringSyntax(StringSyntaxAttribute.Uri)] string uri)
         {
-            if (string.IsNullOrEmpty(address))
-            {
-                throw new ArgumentException(SR.GetResourceString(SR.ID0102), nameof(address));
-            }
+            ArgumentException.ThrowIfNullOrEmpty(uri);
 
             // Don't allow validation to alter the post_logout_redirect_uri parameter extracted
-            // from the request if the address was explicitly provided by the client application.
+            // from the request if the URI was explicitly provided by the client application.
             if (!string.IsNullOrEmpty(Request?.PostLogoutRedirectUri) &&
-                !string.Equals(Request.PostLogoutRedirectUri, address, StringComparison.Ordinal))
+                !string.Equals(Request.PostLogoutRedirectUri, uri, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(SR.GetResourceString(SR.ID0103));
             }
 
-            PostLogoutRedirectUri = address;
+            PostLogoutRedirectUri = uri;
         }
     }
 
     /// <summary>
-    /// Represents an event called for each validated logout request
+    /// Represents an event called for each validated end session request
     /// to allow the user code to decide how the request should be handled.
     /// </summary>
-    public class HandleLogoutRequestContext : BaseValidatingContext
+    public sealed class HandleEndSessionRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="HandleLogoutRequestContext"/> class.
+        /// Creates a new instance of the <see cref="HandleEndSessionRequestContext"/> class.
         /// </summary>
-        public HandleLogoutRequestContext(OpenIddictServerTransaction transaction)
+        public HandleEndSessionRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
@@ -105,6 +123,12 @@ public static partial class OpenIddictServerEvents
             get => Transaction.Request!;
             set => Transaction.Request = value;
         }
+
+        /// <summary>
+        /// Gets or sets the security principal extracted
+        /// from the identity token hint, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? IdentityTokenHintPrincipal { get; set; }
 
         /// <summary>
         /// Gets a boolean indicating whether a sign-out should be triggered.
@@ -134,20 +158,20 @@ public static partial class OpenIddictServerEvents
     }
 
     /// <summary>
-    /// Represents an event called before the logout response is returned to the caller.
+    /// Represents an event called before the end session response is returned to the caller.
     /// </summary>
-    public class ApplyLogoutResponseContext : BaseRequestContext
+    public sealed class ApplyEndSessionResponseContext : BaseRequestContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ApplyLogoutResponseContext"/> class.
+        /// Creates a new instance of the <see cref="ApplyEndSessionResponseContext"/> class.
         /// </summary>
-        public ApplyLogoutResponseContext(OpenIddictServerTransaction transaction)
+        public ApplyEndSessionResponseContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it couldn't be extracted.
+        /// Gets or sets the request, or <see langword="null"/> if it couldn't be extracted.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -167,15 +191,15 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets the error code returned to the client application.
         /// When the response indicates a successful response,
-        /// this property returns <c>null</c>.
+        /// this property returns <see langword="null"/>.
         /// </summary>
         public string? Error => Response.Error;
 
         /// <summary>
-        /// Gets or sets the callback URL the user agent will be redirected to, if applicable.
+        /// Gets or sets the post-logout redirect URI the user agent will be redirected to, if applicable.
         /// Note: manually changing the value of this property is generally not recommended
         /// and extreme caution must be taken to ensure the user agent is not redirected to
-        /// an untrusted address, which would result in an "open redirection" vulnerability.
+        /// an untrusted URI, which would result in an "open redirection" vulnerability.
         /// </summary>
         public string? PostLogoutRedirectUri { get; set; }
     }

@@ -5,7 +5,9 @@
  * the license and the contributors participating to this project.
  */
 
-using System.Text.Json;
+using System.Collections.Immutable;
+using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace OpenIddict.Abstractions.Tests.Primitives;
@@ -41,14 +43,14 @@ public class OpenIddictRequestTests
             {
                 /* property: */ nameof(OpenIddictRequest.Audiences),
                 /* name: */ Parameters.Audience,
-                /* value: */ new OpenIddictParameter(new[] { "Fabrikam", "Contoso" })
+                /* value: */ new OpenIddictParameter(["Fabrikam", "Contoso"])
             };
 
             yield return new object[]
             {
                 /* property: */ nameof(OpenIddictRequest.Claims),
                 /* name: */ Parameters.Claims,
-                /* value: */ new OpenIddictParameter(JsonSerializer.Deserialize<JsonElement>(@"{""userinfo"": {}}"))
+                /* value: */ new OpenIddictParameter(JsonObject.Parse(@"{""userinfo"": {}}"))
             };
 
             yield return new object[]
@@ -144,6 +146,13 @@ public class OpenIddictRequestTests
 
             yield return new object[]
             {
+                /* property: */ nameof(OpenIddictRequest.IdToken),
+                /* name: */ Parameters.IdToken,
+                /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
+            };
+
+            yield return new object[]
+            {
                 /* property: */ nameof(OpenIddictRequest.IdTokenHint),
                 /* name: */ Parameters.IdTokenHint,
                 /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
@@ -209,20 +218,13 @@ public class OpenIddictRequestTests
             {
                 /* property: */ nameof(OpenIddictRequest.Registration),
                 /* name: */ Parameters.Registration,
-                /* value: */ new OpenIddictParameter(JsonSerializer.Deserialize<JsonElement>(@"{""policy_uri"": ""http://www.fabrikam.com/policy""}"))
+                /* value: */ new OpenIddictParameter(JsonObject.Parse(@"{""policy_uri"": ""http://www.fabrikam.com/policy""}"))
             };
 
             yield return new object[]
             {
                 /* property: */ nameof(OpenIddictRequest.Request),
                 /* name: */ Parameters.Request,
-                /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
-            };
-
-            yield return new object[]
-            {
-                /* property: */ nameof(OpenIddictRequest.RequestId),
-                /* name: */ Parameters.RequestId,
                 /* value: */ new OpenIddictParameter("802A3E3E-DCCA-4EFC-89FA-7D82FE8C27E4")
             };
 
@@ -237,7 +239,7 @@ public class OpenIddictRequestTests
             {
                 /* property: */ nameof(OpenIddictRequest.Resources),
                 /* name: */ Parameters.Resource,
-                /* value: */ new OpenIddictParameter(new[] { "https://fabrikam.com/", "https://contoso.com/" })
+                /* value: */ new OpenIddictParameter(["https://fabrikam.com/", "https://contoso.com/"])
             };
 
             yield return new object[]
@@ -314,7 +316,16 @@ public class OpenIddictRequestTests
         request.SetParameter(name, value);
 
         // Act and assert
-        Assert.Equal(value.Value, typeof(OpenIddictRequest).GetProperty(property)!.GetValue(request));
+        var info = typeof(OpenIddictRequest).GetProperty(property)!;
+        if (typeof(JsonNode).IsAssignableFrom(info.PropertyType))
+        {
+            Assert.True(JsonNode.DeepEquals((JsonNode?) value.GetRawValue(), (JsonNode?) info.GetValue(request)));
+        }
+
+        else
+        {
+            Assert.Equal(value.GetRawValue(), info.GetValue(request));
+        }
     }
 
     [Theory]
@@ -325,7 +336,16 @@ public class OpenIddictRequestTests
         var request = new OpenIddictRequest();
 
         // Act
-        typeof(OpenIddictRequest).GetProperty(property)!.SetValue(request, value.Value);
+        var info = typeof(OpenIddictRequest).GetProperty(property)!;
+        if (typeof(ImmutableArray<string?>).IsAssignableFrom(info.PropertyType))
+        {
+            info.SetValue(request, ImmutableCollectionsMarshal.AsImmutableArray((string?[]?) value.GetRawValue()));
+        }
+
+        else
+        {
+            info.SetValue(request, value.GetRawValue());
+        }
 
         // Assert
         Assert.Equal(value, request.GetParameter(name));

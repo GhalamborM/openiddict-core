@@ -24,6 +24,12 @@ public static class OpenIddictConstants
         public const string RsaSsaPssSha512 = "PS512";
     }
 
+    public static class ApplicationTypes
+    {
+        public const string Native = "native";
+        public const string Web = "web";
+    }
+
     public static class AuthenticationMethodReferences
     {
         public const string Face = "face";
@@ -58,15 +64,19 @@ public static class OpenIddictConstants
     {
         public const string AccessTokenHash = "at_hash";
         public const string Active = "active";
+        public const string Actor = "actor";
         public const string Address = "address";
         public const string Audience = "aud";
         public const string AuthenticationContextReference = "acr";
         public const string AuthenticationMethodReference = "amr";
         public const string AuthenticationTime = "auth_time";
+        public const string AuthorizationServer = "as";
+        public const string AuthorizedActor = "may_act";
         public const string AuthorizedParty = "azp";
         public const string Birthdate = "birthdate";
         public const string ClientId = "client_id";
         public const string CodeHash = "c_hash";
+        public const string Confirmation = "cnf";
         public const string Country = "country";
         public const string Email = "email";
         public const string EmailVerified = "email_verified";
@@ -93,10 +103,13 @@ public static class OpenIddictConstants
         public const string PreferredUsername = "preferred_username";
         public const string Profile = "profile";
         public const string Region = "region";
+        public const string RequestForgeryProtection = "rfp";
         public const string Role = "role";
         public const string Scope = "scope";
+        public const string SessionId = "sid";
         public const string StreetAddress = "street_address";
         public const string Subject = "sub";
+        public const string TargetLinkUri = "target_link_uri";
         public const string TokenType = "token_type";
         public const string TokenUsage = "token_usage";
         public const string UpdatedAt = "updated_at";
@@ -118,27 +131,64 @@ public static class OpenIddictConstants
             public const string ClaimDestinationsMap = "oi_cl_dstn";
             public const string CodeChallenge = "oi_cd_chlg";
             public const string CodeChallengeMethod = "oi_cd_chlg_meth";
+            public const string CodeVerifier = "oi_cd_vrf";
             public const string CreationDate = "oi_crt_dt";
             public const string DeviceCodeId = "oi_dvc_id";
             public const string DeviceCodeLifetime = "oi_dvc_lft";
+            public const string EndpointType = "oi_ept_typ";
             public const string ExpirationDate = "oi_exp_dt";
+            public const string GrantType = "oi_grt_typ";
+            public const string HostProperties = "oi_hst_props";
             public const string IdentityTokenLifetime = "oi_idt_lft";
+            public const string InstanceId = "oi_instc_id";
+            public const string IssuedTokenLifetime = "oi_isst_lft";
+            public const string Issuer = "oi_iss";
             public const string Nonce = "oi_nce";
+            public const string PostLogoutRedirectUri = "oi_pstlgt_reduri";
+            public const string ProviderName = "oi_prvd_name";
             public const string Presenter = "oi_prst";
             public const string RedirectUri = "oi_reduri";
             public const string RefreshTokenLifetime = "oi_reft_lft";
+            public const string RegistrationId = "oi_reg_id";
+            public const string RequestParameters = "oi_req_prms";
+            public const string RequestTokenLifetime = "oi_reqt_lft";
+            public const string RequestTokenType = "oi_reqt_typ";
             public const string Resource = "oi_rsrc";
+            public const string ResponseType = "oi_rsp_typ";
+            public const string SessionId = "oi_ses_id";
+            public const string SigningAlgorithm = "oi_sign_alg";
             public const string Scope = "oi_scp";
+            public const string StateTokenLifetime = "oi_stet_lft";
             public const string TokenId = "oi_tkn_id";
             public const string TokenType = "oi_tkn_typ";
             public const string UserCodeLifetime = "oi_usrc_lft";
         }
     }
+ 
+    public static class ClaimRequestMembers
+    {
+        public const string Essential = "essential";
+        public const string IdToken = "id_token";
+        public const string UserInfo = "userinfo";
+        public const string Value = "value";
+        public const string Values = "values";
+    }
+
+    public static class ClientAssertionTypes
+    {
+        public const string JwtBearer = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+        public const string Saml2Bearer = "urn:ietf:params:oauth:client-assertion-type:saml2-bearer";
+    }
 
     public static class ClientAuthenticationMethods
     {
         public const string ClientSecretBasic = "client_secret_basic";
+        public const string ClientSecretJwt = "client_secret_jwt";
         public const string ClientSecretPost = "client_secret_post";
+        public const string None = "none";
+        public const string PrivateKeyJwt = "private_key_jwt";
+        public const string SelfSignedTlsClientAuth = "self_signed_tls_client_auth";
+        public const string TlsClientAuth = "tls_client_auth";
     }
 
     public static class ClientTypes
@@ -165,6 +215,7 @@ public static class OpenIddictConstants
     {
         public const string AccessToken = "access_token";
         public const string IdentityToken = "id_token";
+        public const string IssuedToken = "issued_token";
     }
 
     public static class Errors
@@ -183,6 +234,7 @@ public static class OpenIddictConstants
         public const string InvalidRequestObject = "invalid_request_object";
         public const string InvalidRequestUri = "invalid_request_uri";
         public const string InvalidScope = "invalid_scope";
+        public const string InvalidTarget = "invalid_target";
         public const string InvalidToken = "invalid_token";
         public const string LoginRequired = "login_required";
         public const string MissingToken = "missing_token";
@@ -193,6 +245,7 @@ public static class OpenIddictConstants
         public const string SlowDown = "slow_down";
         public const string TemporarilyUnavailable = "temporarily_unavailable";
         public const string UnauthorizedClient = "unauthorized_client";
+        public const string UnmetAuthenticationRequirements = "unmet_authentication_requirements";
         public const string UnsupportedGrantType = "unsupported_grant_type";
         public const string UnsupportedResponseType = "unsupported_response_type";
         public const string UnsupportedTokenType = "unsupported_token_type";
@@ -206,12 +259,15 @@ public static class OpenIddictConstants
         public const string Implicit = "implicit";
         public const string Password = "password";
         public const string RefreshToken = "refresh_token";
+        public const string TokenExchange = "urn:ietf:params:oauth:grant-type:token-exchange";
     }
 
     public static class JsonWebTokenTypes
     {
         public const string AccessToken = "at+jwt";
-        public const string IdentityToken = "JWT";
+        public const string AuthorizationGrant = "authorization-grant+jwt";
+        public const string ClientAuthentication = "client-authentication+jwt";
+        public const string GenericJsonWebToken = "JWT";
 
         public static class Prefixes
         {
@@ -223,6 +279,8 @@ public static class OpenIddictConstants
             public const string AuthorizationCode = "oi_auc+jwt";
             public const string DeviceCode = "oi_dvc+jwt";
             public const string RefreshToken = "oi_reft+jwt";
+            public const string RequestToken = "oi_reqt+jwt";
+            public const string StateToken = "oi_stet+jwt";
             public const string UserCode = "oi_usrc+jwt";
         }
     }
@@ -231,12 +289,14 @@ public static class OpenIddictConstants
     {
         public const string AcrValuesSupported = "acr_values_supported";
         public const string AuthorizationEndpoint = "authorization_endpoint";
+        public const string AuthorizationResponseIssParameterSupported = "authorization_response_iss_parameter_supported";
         public const string ClaimsLocalesSupported = "claims_locales_supported";
         public const string ClaimsParameterSupported = "claims_parameter_supported";
         public const string ClaimsSupported = "claims_supported";
         public const string ClaimTypesSupported = "claim_types_supported";
         public const string CodeChallengeMethodsSupported = "code_challenge_methods_supported";
         public const string DeviceAuthorizationEndpoint = "device_authorization_endpoint";
+        public const string DeviceAuthorizationEndpointAuthMethodsSupported = "device_authorization_endpoint_auth_methods_supported";
         public const string DisplayValuesSupported = "display_values_supported";
         public const string EndSessionEndpoint = "end_session_endpoint";
         public const string GrantTypesSupported = "grant_types_supported";
@@ -248,13 +308,18 @@ public static class OpenIddictConstants
         public const string IntrospectionEndpointAuthSigningAlgValuesSupported = "introspection_endpoint_auth_signing_alg_values_supported";
         public const string Issuer = "issuer";
         public const string JwksUri = "jwks_uri";
+        public const string MtlsEndpointAliases = "mtls_endpoint_aliases";
         public const string OpPolicyUri = "op_policy_uri";
         public const string OpTosUri = "op_tos_uri";
+        public const string PromptValuesSupported = "prompt_values_supported";
+        public const string PushedAuthorizationRequestEndpoint = "pushed_authorization_request_endpoint";
+        public const string PushedAuthorizationRequestEndpointAuthMethodsSupported = "pushed_authorization_request_endpoint_auth_methods_supported";
         public const string RequestObjectEncryptionAlgValuesSupported = "request_object_encryption_alg_values_supported";
         public const string RequestObjectEncryptionEncValuesSupported = "request_object_encryption_enc_values_supported";
         public const string RequestObjectSigningAlgValuesSupported = "request_object_signing_alg_values_supported";
         public const string RequestParameterSupported = "request_parameter_supported";
         public const string RequestUriParameterSupported = "request_uri_parameter_supported";
+        public const string RequirePushedAuthorizationRequests = "require_pushed_authorization_requests";
         public const string RequireRequestUriRegistration = "require_request_uri_registration";
         public const string ResponseModesSupported = "response_modes_supported";
         public const string ResponseTypesSupported = "response_types_supported";
@@ -264,21 +329,38 @@ public static class OpenIddictConstants
         public const string ScopesSupported = "scopes_supported";
         public const string ServiceDocumentation = "service_documentation";
         public const string SubjectTypesSupported = "subject_types_supported";
+        public const string TlsClientCertificateBoundAccessTokens = "tls_client_certificate_bound_access_tokens";
         public const string TokenEndpoint = "token_endpoint";
         public const string TokenEndpointAuthMethodsSupported = "token_endpoint_auth_methods_supported";
         public const string TokenEndpointAuthSigningAlgValuesSupported = "token_endpoint_auth_signing_alg_values_supported";
         public const string UiLocalesSupported = "ui_locales_supported";
-        public const string UserinfoEncryptionAlgValuesSupported = "userinfo_encryption_alg_values_supported";
-        public const string UserinfoEncryptionEncValuesSupported = "userinfo_encryption_enc_values_supported";
-        public const string UserinfoEndpoint = "userinfo_endpoint";
-        public const string UserinfoSigningAlgValuesSupported = "userinfo_signing_alg_values_supported";
+        public const string UserInfoEncryptionAlgValuesSupported = "userinfo_encryption_alg_values_supported";
+        public const string UserInfoEncryptionEncValuesSupported = "userinfo_encryption_enc_values_supported";
+        public const string UserInfoEndpoint = "userinfo_endpoint";
+        public const string UserInfoSigningAlgValuesSupported = "userinfo_signing_alg_values_supported";
+    }
+
+    public static class ObjectIdentifiers
+    {
+        public static class CertificateExtensions
+        {
+            public const string AuthorityInfoAccess = "1.3.6.1.5.5.7.1.1";
+            public const string CrlDistributionPoints = "2.5.29.31";
+        }
+
+        public static class ExtendedKeyUsages
+        {
+            public const string ClientAuthentication = "1.3.6.1.5.5.7.3.2";
+        }
     }
 
     public static class Parameters
     {
         public const string AccessToken = "access_token";
-        public const string Active = "active";
         public const string AcrValues = "acr_values";
+        public const string Active = "active";
+        public const string ActorToken = "actor_token";
+        public const string ActorTokenType = "actor_token_type";
         public const string Assertion = "assertion";
         public const string Audience = "audience";
         public const string Claims = "claims";
@@ -301,6 +383,9 @@ public static class OpenIddictConstants
         public const string IdentityProvider = "identity_provider";
         public const string IdToken = "id_token";
         public const string IdTokenHint = "id_token_hint";
+        public const string Interval = "interval";
+        public const string Iss = "iss";
+        public const string IssuedTokenType = "issued_token_type";
         public const string LoginHint = "login_hint";
         public const string Keys = "keys";
         public const string MaxAge = "max_age";
@@ -313,13 +398,15 @@ public static class OpenIddictConstants
         public const string RefreshToken = "refresh_token";
         public const string Registration = "registration";
         public const string Request = "request";
-        public const string RequestId = "request_id";
+        public const string RequestedTokenType = "requested_token_type";
         public const string RequestUri = "request_uri";
         public const string Resource = "resource";
         public const string ResponseMode = "response_mode";
         public const string ResponseType = "response_type";
         public const string Scope = "scope";
         public const string State = "state";
+        public const string SubjectToken = "subject_token";
+        public const string SubjectTokenType = "subject_token_type";
         public const string Token = "token";
         public const string TokenType = "token_type";
         public const string TokenTypeHint = "token_type_hint";
@@ -335,9 +422,10 @@ public static class OpenIddictConstants
         public static class Endpoints
         {
             public const string Authorization = "ept:authorization";
-            public const string Device = "ept:device";
+            public const string DeviceAuthorization = "ept:device_authorization";
+            public const string EndSession = "ept:end_session";
             public const string Introspection = "ept:introspection";
-            public const string Logout = "ept:logout";
+            public const string PushedAuthorization = "ept:pushed_authorization";
             public const string Revocation = "ept:revocation";
             public const string Token = "ept:token";
         }
@@ -350,13 +438,16 @@ public static class OpenIddictConstants
             public const string Implicit = "gt:implicit";
             public const string Password = "gt:password";
             public const string RefreshToken = "gt:refresh_token";
+            public const string TokenExchange = "gt:urn:ietf:params:oauth:grant-type:token-exchange";
         }
 
         public static class Prefixes
         {
+            public const string Audience = "aud:";
             public const string Endpoint = "ept:";
             public const string GrantType = "gt:";
             public const string ResponseType = "rst:";
+            public const string Resource = "rsrc:";
             public const string Scope = "scp:";
         }
 
@@ -382,9 +473,10 @@ public static class OpenIddictConstants
         }
     }
 
-    public static class Prompts
+    public static class PromptValues
     {
         public const string Consent = "consent";
+        public const string Create = "create";
         public const string Login = "login";
         public const string None = "none";
         public const string SelectAccount = "select_account";
@@ -395,11 +487,30 @@ public static class OpenIddictConstants
         public const string Destinations = ".destinations";
     }
 
+    public static class RequestTokenTypes
+    {
+        public static class Private
+        {
+            public const string CachedAuthorizationRequest = "cached_authorization_request";
+            public const string CachedEndSessionRequest = "cached_end_session_request";
+            public const string PushedAuthorizationRequest = "pushed_authorization_request";
+        }
+    }
+
+    public static class RequestUris
+    {
+        public static class Prefixes
+        {
+            public const string Generic = "urn:ietf:params:oauth:request_uri:";
+        }
+    }
+
     public static class Requirements
     {
         public static class Features
         {
             public const string ProofKeyForCodeExchange = "ft:pkce";
+            public const string PushedAuthorizationRequests = "ft:par";
         }
 
         public static class Prefixes
@@ -423,13 +534,6 @@ public static class OpenIddictConstants
         public const string Token = "token";
     }
 
-    public static class Separators
-    {
-        public static readonly char[] Ampersand = { '&' };
-        public static readonly char[] Dash = { '-' };
-        public static readonly char[] Space = { ' ' };
-    }
-
     public static class Schemes
     {
         public const string Basic = "Basic";
@@ -447,6 +551,41 @@ public static class OpenIddictConstants
         public const string Roles = "roles";
     }
 
+    public static class Separators
+    {
+        public static readonly char[] Ampersand = ['&'];
+        public static readonly char[] Comma = [','];
+        public static readonly char[] Dash = ['-'];
+        public static readonly char[] Dot = ['.'];
+        public static readonly char[] DoubleQuote = ['"'];
+        public static readonly char[] EqualsSign = ['='];
+        public static readonly char[] Hash = ['#'];
+        public static readonly char[] Plus = ['+'];
+        public static readonly char[] QuestionMark = ['?'];
+        public static readonly char[] Semicolon = [';'];
+        public static readonly char[] Space = [' '];
+    }
+
+    public static class Settings
+    {
+        public static class Prefixes
+        {
+            public const string TokenLifetime = "tkn_lft:";
+        }
+
+        public static class TokenLifetimes
+        {
+            public const string AccessToken = "tkn_lft:act";
+            public const string AuthorizationCode = "tkn_lft:auc";
+            public const string DeviceCode = "tkn_lft:dvc";
+            public const string IdentityToken = "tkn_lft:idt";
+            public const string IssuedToken = "tkn_lft:isst";
+            public const string RefreshToken = "tkn_lft:reft";
+            public const string RequestToken = "tkn_lft:reqt";
+            public const string UserCode = "tkn_lft:usrc";
+        }
+    }
+
     public static class Statuses
     {
         public const string Inactive = "inactive";
@@ -462,18 +601,62 @@ public static class OpenIddictConstants
         public const string Public = "public";
     }
 
+    public static class TokenBindingMethods
+    {
+        public static class Private
+        {
+            public const string SelfSignedTlsClientCertificate = "urn:openiddict:params:oauth:token-binding-method:self_signed_tls_client_certificate";
+            public const string TlsClientCertificate = "urn:openiddict:params:oauth:token-binding-method:tls_client_certificate";
+        }
+    }
+
+    public static class TokenFormats
+    {
+        public static class Private
+        {
+            public const string DataProtection = "urn:openiddict:params:oauth:token-format:data_protection";
+            public const string JsonWebToken = "urn:openiddict:params:oauth:token-format:jwt";
+            public const string Saml1 = "urn:openiddict:params:oauth:token-format:saml1";
+            public const string Saml2 = "urn:openiddict:params:oauth:token-format:saml2";
+        }
+    }
+
     public static class TokenTypeHints
     {
         public const string AccessToken = "access_token";
-        public const string AuthorizationCode = "authorization_code";
-        public const string DeviceCode = "device_code";
-        public const string IdToken = "id_token";
         public const string RefreshToken = "refresh_token";
-        public const string UserCode = "user_code";
+    }
+
+    public static class TokenTypeIdentifiers
+    {
+        public const string AccessToken = "urn:ietf:params:oauth:token-type:access_token";
+        public const string GenericJsonWebToken = "urn:ietf:params:oauth:token-type:jwt";
+        public const string GenericSaml1Assertion = "urn:ietf:params:oauth:token-type:saml1";
+        public const string GenericSaml2Assertion = "urn:ietf:params:oauth:token-type:saml2";
+        public const string IdentityToken = "urn:ietf:params:oauth:token-type:id_token";
+        public const string RefreshToken = "urn:ietf:params:oauth:token-type:refresh_token";
+
+        public static class Prefixes
+        {
+            public const string Ietf = "urn:ietf:params:oauth:token-type:";
+            public const string OpenIddict = "urn:openiddict:params:oauth:token-type:";
+        }
+
+        public static class Private
+        {
+            public const string AuthorizationCode = "urn:openiddict:params:oauth:token-type:authorization_code";
+            public const string ClientAssertion = "urn:openiddict:params:oauth:token-type:client_assertion";
+            public const string DeviceCode = "urn:openiddict:params:oauth:token-type:device_code";
+            public const string RequestToken = "urn:openiddict:params:oauth:token-type:request_token";
+            public const string StateToken = "urn:openiddict:params:oauth:token-type:state_token";
+            public const string UserCode = "urn:openiddict:params:oauth:token-type:user_code";
+            public const string UserInfoToken = "urn:openiddict:params:oauth:token-type:userinfo_token";
+        }
     }
 
     public static class TokenTypes
     {
         public const string Bearer = "Bearer";
+        public const string NotApplicable = "N_A";
     }
 }

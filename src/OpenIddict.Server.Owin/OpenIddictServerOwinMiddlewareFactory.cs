@@ -4,8 +4,7 @@
  * the license and the contributors participating to this project.
  */
 
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
+using System.ComponentModel;
 
 namespace OpenIddict.Server.Owin;
 
@@ -13,7 +12,8 @@ namespace OpenIddict.Server.Owin;
 /// Provides the entry point necessary to instantiate and register the scoped
 /// <see cref="OpenIddictServerOwinMiddleware"/> in an OWIN/Katana pipeline.
 /// </summary>
-public class OpenIddictServerOwinMiddlewareFactory : OwinMiddleware
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictServerOwinMiddlewareFactory : OwinMiddleware
 {
     /// <summary>
     /// Creates a new instance of the <see cref="OpenIddictServerOwinMiddlewareFactory"/> class.
@@ -31,20 +31,11 @@ public class OpenIddictServerOwinMiddlewareFactory : OwinMiddleware
     /// </summary>
     /// <param name="context">The <see cref="IOwinContext"/>.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
+    /// A <see cref="Task"/> that can be used to monitor the asynchronous operation.
     /// </returns>
     public override Task Invoke(IOwinContext context)
     {
-        if (context is null)
-        {
-            throw new ArgumentNullException(nameof(context));
-        }
-
-        var provider = context.Get<IServiceProvider>(typeof(IServiceProvider).FullName);
-        if (provider is null)
-        {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0121));
-        }
+        ArgumentNullException.ThrowIfNull(context);
 
         // Note: the Microsoft.Extensions.DependencyInjection container doesn't support resolving services
         // with arbitrary parameters, which prevents the server OWIN middleware from being resolved directly
@@ -52,13 +43,9 @@ public class OpenIddictServerOwinMiddlewareFactory : OwinMiddleware
         // To work around this limitation, the server OWIN middleware is manually instantiated and invoked.
         var middleware = new OpenIddictServerOwinMiddleware(
             next: Next,
-            options: GetRequiredService<IOptionsMonitor<OpenIddictServerOwinOptions>>(provider),
-            dispatcher: GetRequiredService<IOpenIddictServerDispatcher>(provider),
-            factory: GetRequiredService<IOpenIddictServerFactory>(provider));
+            provider: context.Get<IServiceProvider>(typeof(IServiceProvider).FullName)
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0121)));
 
         return middleware.Invoke(context);
-
-        static T GetRequiredService<T>(IServiceProvider provider) => provider.GetService<T>() ??
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0122));
     }
 }

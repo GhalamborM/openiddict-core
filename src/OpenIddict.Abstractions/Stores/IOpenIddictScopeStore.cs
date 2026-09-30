@@ -13,7 +13,7 @@ namespace OpenIddict.Abstractions;
 /// <summary>
 /// Provides methods allowing to manage the scopes stored in a database.
 /// </summary>
-/// <typeparam name="TScope">The type of the Scope entity.</typeparam>
+/// <typeparam name="TScope">The type of the scope entity.</typeparam>
 public interface IOpenIddictScopeStore<TScope> where TScope : class
 {
     /// <summary>
@@ -21,7 +21,7 @@ public interface IOpenIddictScopeStore<TScope> where TScope : class
     /// </summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of scopes in the database.
     /// </returns>
     ValueTask<long> CountAsync(CancellationToken cancellationToken);
@@ -29,14 +29,18 @@ public interface IOpenIddictScopeStore<TScope> where TScope : class
     /// <summary>
     /// Determines the number of scopes that match the specified query.
     /// </summary>
+    /// <typeparam name="TState">The state type.</typeparam>
     /// <typeparam name="TResult">The result type.</typeparam>
     /// <param name="query">The query to execute.</param>
+    /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of scopes that match the specified query.
     /// </returns>
-    ValueTask<long> CountAsync<TResult>(Func<IQueryable<TScope>, IQueryable<TResult>> query, CancellationToken cancellationToken);
+    ValueTask<long> CountAsync<TState, TResult>(
+        Func<IQueryable<TScope>, TState, IQueryable<TResult>> query,
+        TState state, CancellationToken cancellationToken);
 
     /// <summary>
     /// Creates a new scope.
@@ -60,7 +64,7 @@ public interface IOpenIddictScopeStore<TScope> where TScope : class
     /// <param name="identifier">The unique identifier associated with the scope.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the scope corresponding to the identifier.
     /// </returns>
     ValueTask<TScope?> FindByIdAsync(string identifier, CancellationToken cancellationToken);
@@ -71,7 +75,7 @@ public interface IOpenIddictScopeStore<TScope> where TScope : class
     /// <param name="name">The name associated with the scope.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the scope corresponding to the specified name.
     /// </returns>
     ValueTask<TScope?> FindByNameAsync(string name, CancellationToken cancellationToken);
@@ -101,7 +105,7 @@ public interface IOpenIddictScopeStore<TScope> where TScope : class
     /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the first element returned when executing the query.
     /// </returns>
     ValueTask<TResult?> GetAsync<TState, TResult>(

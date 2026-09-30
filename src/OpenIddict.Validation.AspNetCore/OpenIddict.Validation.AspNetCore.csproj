@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;netcoreapp3.1;net5.0;net6.0</TargetFrameworks>
+    <TargetFrameworks>$(NetCoreTargetFrameworks)</TargetFrameworks>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -13,16 +13,8 @@
     <ProjectReference Include="..\OpenIddict.Validation\OpenIddict.Validation.csproj" />
   </ItemGroup>
 
-  <ItemGroup
-    Condition=" '$(TargetFrameworkIdentifier)' == '.NETCoreApp' And $([MSBuild]::VersionGreaterThanOrEquals($(TargetFrameworkVersion), '3.0')) ">
+  <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup
-    Condition=" ('$(TargetFrameworkIdentifier)' == '.NETCoreApp' And $([MSBuild]::VersionLessThan($(TargetFrameworkVersion), '3.0'))) Or
-                ('$(TargetFrameworkIdentifier)' == '.NETFramework') Or
-                ('$(TargetFrameworkIdentifier)' == '.NETStandard') ">
-    <PackageReference Include="Microsoft.AspNetCore.Authentication" />
   </ItemGroup>
 
   <ItemGroup>

@@ -21,13 +21,10 @@ public static class OpenIddictServerOwinExtensions
     /// </summary>
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictServerOwinBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictServerOwinBuilder"/> instance.</returns>
     public static OpenIddictServerOwinBuilder UseOwin(this OpenIddictServerBuilder builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         builder.Services.AddWebEncoders();
 
@@ -41,24 +38,22 @@ public static class OpenIddictServerOwinExtensions
         builder.Services.TryAdd(OpenIddictServerOwinHandlers.DefaultHandlers.Select(descriptor => descriptor.ServiceDescriptor));
 
         // Register the built-in filters used by the default OpenIddict OWIN server event handlers.
-        builder.Services.TryAddSingleton<RequireAuthorizationRequestCachingEnabled>();
         builder.Services.TryAddSingleton<RequireAuthorizationEndpointPassthroughEnabled>();
+        builder.Services.TryAddSingleton<RequireEndSessionEndpointPassthroughEnabled>();
         builder.Services.TryAddSingleton<RequireErrorPassthroughEnabled>();
-        builder.Services.TryAddSingleton<RequireLogoutRequestCachingEnabled>();
-        builder.Services.TryAddSingleton<RequireLogoutEndpointPassthroughEnabled>();
         builder.Services.TryAddSingleton<RequireTransportSecurityRequirementEnabled>();
         builder.Services.TryAddSingleton<RequireOwinRequest>();
         builder.Services.TryAddSingleton<RequireTokenEndpointPassthroughEnabled>();
-        builder.Services.TryAddSingleton<RequireUserinfoEndpointPassthroughEnabled>();
+        builder.Services.TryAddSingleton<RequireUserInfoEndpointPassthroughEnabled>();
         builder.Services.TryAddSingleton<RequireVerificationEndpointPassthroughEnabled>();
 
         // Register the option initializers used by the OpenIddict OWIN server integration services.
         // Note: TryAddEnumerable() is used here to ensure the initializers are only registered once.
-        builder.Services.TryAddEnumerable(new[]
-        {
-            ServiceDescriptor.Singleton<IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerOwinConfiguration>(),
-            ServiceDescriptor.Singleton<IPostConfigureOptions<OpenIddictServerOwinOptions>, OpenIddictServerOwinConfiguration>()
-        });
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerOwinConfiguration>());
+
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<OpenIddictServerOptions>, OpenIddictServerOwinConfiguration>());
 
         return new OpenIddictServerOwinBuilder(builder.Services);
     }
@@ -69,19 +64,12 @@ public static class OpenIddictServerOwinExtensions
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <param name="configuration">The configuration delegate used to configure the server services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictServerBuilder"/> instance.</returns>
     public static OpenIddictServerBuilder UseOwin(
         this OpenIddictServerBuilder builder, Action<OpenIddictServerOwinBuilder> configuration)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(builder.UseOwin());
 

@@ -4,8 +4,12 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Collections.Immutable;
+using System.Collections.Specialized;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Primitives;
 
@@ -15,7 +19,7 @@ namespace OpenIddict.Abstractions;
 /// Represents a generic OpenIddict request.
 /// </summary>
 /// <remarks>
-/// Security notice: developers instantiating this type are responsible of ensuring that the
+/// Security notice: developers instantiating this type are responsible for ensuring that the
 /// imported parameters are safe and won't cause the resulting message to grow abnormally,
 /// which may result in an excessive memory consumption and a potential denial of service.
 /// </remarks>
@@ -46,6 +50,16 @@ public class OpenIddictRequest : OpenIddictMessage
     /// </summary>
     /// <param name="parameters">The request parameters.</param>
     /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+    public OpenIddictRequest(JsonObject parameters)
+        : base(parameters)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new OpenIddict request.
+    /// </summary>
+    /// <param name="parameters">The request parameters.</param>
+    /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
     public OpenIddictRequest(IEnumerable<KeyValuePair<string, OpenIddictParameter>> parameters)
         : base(parameters)
     {
@@ -66,7 +80,7 @@ public class OpenIddictRequest : OpenIddictMessage
     /// </summary>
     /// <param name="parameters">The request parameters.</param>
     /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
-    public OpenIddictRequest(IEnumerable<KeyValuePair<string, string?[]?>> parameters)
+    public OpenIddictRequest(IEnumerable<KeyValuePair<string, ImmutableArray<string?>>> parameters)
         : base(parameters)
     {
     }
@@ -77,6 +91,16 @@ public class OpenIddictRequest : OpenIddictMessage
     /// <param name="parameters">The request parameters.</param>
     /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
     public OpenIddictRequest(IEnumerable<KeyValuePair<string, StringValues>> parameters)
+        : base(parameters)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new OpenIddict request.
+    /// </summary>
+    /// <param name="parameters">The request parameters.</param>
+    /// <remarks>Parameters with a null or empty key are always ignored.</remarks>
+    public OpenIddictRequest(NameValueCollection parameters)
         : base(parameters)
     {
     }
@@ -100,6 +124,24 @@ public class OpenIddictRequest : OpenIddictMessage
     }
 
     /// <summary>
+    /// Gets or sets the "actor_token" parameter.
+    /// </summary>
+    public string? ActorToken
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.ActorToken);
+        set => SetParameter(OpenIddictConstants.Parameters.ActorToken, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the "actor_token_type" parameter.
+    /// </summary>
+    public string? ActorTokenType
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.ActorTokenType);
+        set => SetParameter(OpenIddictConstants.Parameters.ActorTokenType, value);
+    }
+
+    /// <summary>
     /// Gets or sets the "assertion" parameter.
     /// </summary>
     public string? Assertion
@@ -111,18 +153,18 @@ public class OpenIddictRequest : OpenIddictMessage
     /// <summary>
     /// Gets or sets the "audience" parameters.
     /// </summary>
-    public string[]? Audiences
+    public ImmutableArray<string?>? Audiences
     {
-        get => (string[]?) GetParameter(OpenIddictConstants.Parameters.Audience);
+        get => (ImmutableArray<string?>?) GetParameter(OpenIddictConstants.Parameters.Audience);
         set => SetParameter(OpenIddictConstants.Parameters.Audience, value);
     }
 
     /// <summary>
     /// Gets or sets the "claims" parameter.
     /// </summary>
-    public JsonElement Claims
+    public JsonObject? Claims
     {
-        get => (JsonElement) GetParameter(OpenIddictConstants.Parameters.Claims);
+        get => (JsonObject?) GetParameter(OpenIddictConstants.Parameters.Claims);
         set => SetParameter(OpenIddictConstants.Parameters.Claims, value);
     }
 
@@ -165,6 +207,12 @@ public class OpenIddictRequest : OpenIddictMessage
     /// <summary>
     /// Gets or sets the "client_secret" parameter.
     /// </summary>
+    /// <remarks>
+    /// Note: client authentication based on shared secrets is not recommended and should
+    /// only be used for backward compatibility with legacy applications that only support
+    /// client secrets. When possible, consider using public/private key pairs or TLS client
+    /// certificates instead, as these client authentication methods are significantly safer.
+    /// </remarks>
     public string? ClientSecret
     {
         get => (string?) GetParameter(OpenIddictConstants.Parameters.ClientSecret);
@@ -244,6 +292,15 @@ public class OpenIddictRequest : OpenIddictMessage
     }
 
     /// <summary>
+    /// Gets or sets the "id_token" parameter.
+    /// </summary>
+    public string? IdToken
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.IdToken);
+        set => SetParameter(OpenIddictConstants.Parameters.IdToken, value);
+    }
+
+    /// <summary>
     /// Gets or sets the "id_token_hint" parameter.
     /// </summary>
     public string? IdTokenHint
@@ -291,6 +348,7 @@ public class OpenIddictRequest : OpenIddictMessage
     /// <summary>
     /// Gets or sets the "post_logout_redirect_uri" parameter.
     /// </summary>
+    [StringSyntax(StringSyntaxAttribute.Uri)]
     public string? PostLogoutRedirectUri
     {
         get => (string?) GetParameter(OpenIddictConstants.Parameters.PostLogoutRedirectUri);
@@ -309,6 +367,7 @@ public class OpenIddictRequest : OpenIddictMessage
     /// <summary>
     /// Gets or sets the "redirect_uri" parameter.
     /// </summary>
+    [StringSyntax(StringSyntaxAttribute.Uri)]
     public string? RedirectUri
     {
         get => (string?) GetParameter(OpenIddictConstants.Parameters.RedirectUri);
@@ -334,12 +393,12 @@ public class OpenIddictRequest : OpenIddictMessage
     }
 
     /// <summary>
-    /// Gets or sets the "request_id" parameter.
+    /// Gets or sets the "requested_token_type" parameter.
     /// </summary>
-    public string? RequestId
+    public string? RequestedTokenType
     {
-        get => (string?) GetParameter(OpenIddictConstants.Parameters.RequestId);
-        set => SetParameter(OpenIddictConstants.Parameters.RequestId, value);
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.RequestedTokenType);
+        set => SetParameter(OpenIddictConstants.Parameters.RequestedTokenType, value);
     }
 
     /// <summary>
@@ -354,9 +413,9 @@ public class OpenIddictRequest : OpenIddictMessage
     /// <summary>
     /// Gets or sets the "resource" parameters.
     /// </summary>
-    public string[]? Resources
+    public ImmutableArray<string?>? Resources
     {
-        get => (string[]?) GetParameter(OpenIddictConstants.Parameters.Resource);
+        get => (ImmutableArray<string?>?) GetParameter(OpenIddictConstants.Parameters.Resource);
         set => SetParameter(OpenIddictConstants.Parameters.Resource, value);
     }
 
@@ -397,6 +456,24 @@ public class OpenIddictRequest : OpenIddictMessage
     }
 
     /// <summary>
+    /// Gets or sets the "subject_token" parameter.
+    /// </summary>
+    public string? SubjectToken
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.SubjectToken);
+        set => SetParameter(OpenIddictConstants.Parameters.SubjectToken, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the "subject_token_type" parameter.
+    /// </summary>
+    public string? SubjectTokenType
+    {
+        get => (string?) GetParameter(OpenIddictConstants.Parameters.SubjectTokenType);
+        set => SetParameter(OpenIddictConstants.Parameters.SubjectTokenType, value);
+    }
+
+    /// <summary>
     /// Gets or sets the "token" parameter.
     /// </summary>
     public string? Token
@@ -417,9 +494,9 @@ public class OpenIddictRequest : OpenIddictMessage
     /// <summary>
     /// Gets or sets the "registration" parameter.
     /// </summary>
-    public JsonElement Registration
+    public JsonObject? Registration
     {
-        get => (JsonElement) GetParameter(OpenIddictConstants.Parameters.Registration);
+        get => (JsonObject?) GetParameter(OpenIddictConstants.Parameters.Registration);
         set => SetParameter(OpenIddictConstants.Parameters.Registration, value);
     }
 

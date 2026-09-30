@@ -1,0 +1,234 @@
+﻿/*
+ * Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+ * See https://github.com/openiddict/openiddict-core for more information concerning
+ * the license and the contributors participating to this project.
+ */
+
+using System.ComponentModel;
+using Microsoft.Extensions.Options;
+using static OpenIddict.Client.SystemIntegration.OpenIddictClientSystemIntegrationAuthenticationMode;
+
+namespace OpenIddict.Client.SystemIntegration;
+
+/// <summary>
+/// Contains a collection of event handler filters commonly used by the system integration handlers.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public static class OpenIddictClientSystemIntegrationHandlerFilters
+{
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if
+    /// the AS web authentication session integration was not enabled.
+    /// </summary>
+    public sealed class RequireASWebAuthenticationSession : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        private readonly IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> _options;
+
+        public RequireASWebAuthenticationSession(IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> options)
+            => _options = options ?? throw new ArgumentNullException(nameof(options));
+
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+#if IOS || MACCATALYST || MACOS
+            if (IsASWebAuthenticationSessionSupported())
+            {
+                if (!context.Transaction.Properties.TryGetValue(
+                    typeof(OpenIddictClientSystemIntegrationAuthenticationMode).FullName!, out var result) ||
+                    result is not OpenIddictClientSystemIntegrationAuthenticationMode mode)
+                {
+                    mode = _options.CurrentValue.AuthenticationMode.GetValueOrDefault();
+                }
+
+                return new(mode is ASWebAuthenticationSession);
+            }
+#endif
+            return new(false);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers
+    /// if no explicit nonce was attached to the authentication context.
+    /// </summary>
+    public sealed class RequireAuthenticationNonce : IOpenIddictClientHandlerFilter<ProcessAuthenticationContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ProcessAuthenticationContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(!string.IsNullOrEmpty(context.Nonce));
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if the custom tabs intent integration was not enabled.
+    /// </summary>
+    public sealed class RequireCustomTabsIntent : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        private readonly IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> _options;
+
+        public RequireCustomTabsIntent(IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> options)
+            => _options = options ?? throw new ArgumentNullException(nameof(options));
+
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+#if ANDROID
+            if (IsCustomTabsIntentSupported())
+            {
+                if (!context.Transaction.Properties.TryGetValue(
+                    typeof(OpenIddictClientSystemIntegrationAuthenticationMode).FullName!, out var result) ||
+                    result is not OpenIddictClientSystemIntegrationAuthenticationMode mode)
+                {
+                    mode = _options.CurrentValue.AuthenticationMode.GetValueOrDefault();
+                }
+
+                return new(mode is CustomTabsIntent);
+            }
+#endif
+            return new(false);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if the embedded web server was not enabled.
+    /// </summary>
+    public sealed class RequireEmbeddedWebServerEnabled : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        private readonly IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> _options;
+
+        public RequireEmbeddedWebServerEnabled(IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> options)
+            => _options = options ?? throw new ArgumentNullException(nameof(options));
+
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(_options.CurrentValue.EnableEmbeddedWebServer is true);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no HTTP listener context can be found.
+    /// </summary>
+    public sealed class RequireHttpListenerContext : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(context.Transaction.GetHttpListenerContext() is not null);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no interactive user session was detected.
+    /// </summary>
+    public sealed class RequireInteractiveSession : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(Environment.UserInteractive);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no
+    /// platform callback can be found in the transaction properties.
+    /// </summary>
+    public sealed class RequirePlatformCallback : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(context.Transaction.GetPlatformCallback() is not null);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no protocol activation was found.
+    /// </summary>
+    public sealed class RequireProtocolActivation : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(context.Transaction.GetProtocolActivation() is not null);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers
+    /// if the system browser integration was not enabled.
+    /// </summary>
+    public sealed class RequireSystemBrowser : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        private readonly IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> _options;
+
+        public RequireSystemBrowser(IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> options)
+            => _options = options ?? throw new ArgumentNullException(nameof(options));
+
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            if (!context.Transaction.Properties.TryGetValue(
+                typeof(OpenIddictClientSystemIntegrationAuthenticationMode).FullName!, out var result) ||
+                result is not OpenIddictClientSystemIntegrationAuthenticationMode mode)
+            {
+                mode = _options.CurrentValue.AuthenticationMode.GetValueOrDefault();
+            }
+
+            return new(mode is SystemBrowser);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if
+    /// the web authentication broker integration was not enabled.
+    /// </summary>
+    public sealed class RequireWebAuthenticationBroker : IOpenIddictClientHandlerFilter<BaseContext>
+    {
+        private readonly IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> _options;
+
+        public RequireWebAuthenticationBroker(IOptionsMonitor<OpenIddictClientSystemIntegrationOptions> options)
+            => _options = options ?? throw new ArgumentNullException(nameof(options));
+
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(BaseContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+#if NETFRAMEWORK || WINDOWS10_0_17763_0_OR_GREATER
+            if (IsWebAuthenticationBrokerSupported())
+            {
+                if (!context.Transaction.Properties.TryGetValue(
+                    typeof(OpenIddictClientSystemIntegrationAuthenticationMode).FullName!, out var result) ||
+                    result is not OpenIddictClientSystemIntegrationAuthenticationMode mode)
+                {
+                    mode = _options.CurrentValue.AuthenticationMode.GetValueOrDefault();
+                }
+
+                return new(mode is WebAuthenticationBroker);
+            }
+#endif
+            return new(false);
+        }
+    }
+}

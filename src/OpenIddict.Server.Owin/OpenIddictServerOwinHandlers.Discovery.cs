@@ -12,7 +12,8 @@ public static partial class OpenIddictServerOwinHandlers
 {
     public static class Discovery
     {
-        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
+        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } =
+        [
             /*
              * Configuration request extraction:
              */
@@ -22,19 +23,24 @@ public static partial class OpenIddictServerOwinHandlers
              * Configuration response processing:
              */
             AttachHttpResponseCode<ApplyConfigurationResponseContext>.Descriptor,
+            AttachOwinResponseChallenge<ApplyConfigurationResponseContext>.Descriptor,
+            SuppressFormsAuthenticationRedirect<ApplyConfigurationResponseContext>.Descriptor,
             AttachWwwAuthenticateHeader<ApplyConfigurationResponseContext>.Descriptor,
             ProcessJsonResponse<ApplyConfigurationResponseContext>.Descriptor,
 
             /*
-             * Cryptography request extraction:
+             * JSON Web Key Set request extraction:
              */
-            ExtractGetRequest<ExtractCryptographyRequestContext>.Descriptor,
+            ExtractGetRequest<ExtractJsonWebKeySetRequestContext>.Descriptor,
 
             /*
-             * Cryptography response processing:
+             * JSON Web Key Set response processing:
              */
-            AttachHttpResponseCode<ApplyCryptographyResponseContext>.Descriptor,
-            AttachWwwAuthenticateHeader<ApplyCryptographyResponseContext>.Descriptor,
-            ProcessJsonResponse<ApplyCryptographyResponseContext>.Descriptor);
+            AttachHttpResponseCode<ApplyJsonWebKeySetResponseContext>.Descriptor,
+            AttachOwinResponseChallenge<ApplyJsonWebKeySetResponseContext>.Descriptor,
+            SuppressFormsAuthenticationRedirect<ApplyJsonWebKeySetResponseContext>.Descriptor,
+            AttachWwwAuthenticateHeader<ApplyJsonWebKeySetResponseContext>.Descriptor,
+            ProcessJsonResponse<ApplyJsonWebKeySetResponseContext>.Descriptor
+        ];
     }
 }

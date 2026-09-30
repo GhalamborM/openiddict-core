@@ -12,7 +12,7 @@ namespace OpenIddict.Abstractions;
 /// <summary>
 /// Provides methods allowing to manage the authorizations stored in a database.
 /// </summary>
-/// <typeparam name="TAuthorization">The type of the Authorization entity.</typeparam>
+/// <typeparam name="TAuthorization">The type of the authorization entity.</typeparam>
 public interface IOpenIddictAuthorizationStore<TAuthorization> where TAuthorization : class
 {
     /// <summary>
@@ -20,7 +20,7 @@ public interface IOpenIddictAuthorizationStore<TAuthorization> where TAuthorizat
     /// </summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of authorizations in the database.
     /// </returns>
     ValueTask<long> CountAsync(CancellationToken cancellationToken);
@@ -28,14 +28,18 @@ public interface IOpenIddictAuthorizationStore<TAuthorization> where TAuthorizat
     /// <summary>
     /// Determines the number of authorizations that match the specified query.
     /// </summary>
+    /// <typeparam name="TState">The state type.</typeparam>
     /// <typeparam name="TResult">The result type.</typeparam>
     /// <param name="query">The query to execute.</param>
+    /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of authorizations that match the specified query.
     /// </returns>
-    ValueTask<long> CountAsync<TResult>(Func<IQueryable<TAuthorization>, IQueryable<TResult>> query, CancellationToken cancellationToken);
+    ValueTask<long> CountAsync<TState, TResult>(
+        Func<IQueryable<TAuthorization>, TState, IQueryable<TResult>> query,
+        TState state, CancellationToken cancellationToken);
 
     /// <summary>
     /// Creates a new authorization.
@@ -54,54 +58,14 @@ public interface IOpenIddictAuthorizationStore<TAuthorization> where TAuthorizat
     ValueTask DeleteAsync(TAuthorization authorization, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Retrieves the authorizations corresponding to the specified
-    /// subject and associated with the application identifier.
+    /// Retrieves the authorizations matching the specified query.
     /// </summary>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The authorizations corresponding to the subject/client.</returns>
-    IAsyncEnumerable<TAuthorization> FindAsync(string subject, string client, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Retrieves the authorizations matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="status">The authorization status.</param>
+    /// <param name="query">The query parameters: if a parameter is <see langword="null"/>, it will not be used to filter the results.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The authorizations corresponding to the criteria.</returns>
     IAsyncEnumerable<TAuthorization> FindAsync(
-        string subject, string client,
-        string status, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Retrieves the authorizations matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="status">The authorization status.</param>
-    /// <param name="type">The authorization type.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The authorizations corresponding to the criteria.</returns>
-    IAsyncEnumerable<TAuthorization> FindAsync(
-        string subject, string client,
-        string status, string type, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Retrieves the authorizations matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the authorization.</param>
-    /// <param name="client">The client associated with the authorization.</param>
-    /// <param name="status">The authorization status.</param>
-    /// <param name="type">The authorization type.</param>
-    /// <param name="scopes">The minimal scopes associated with the authorization.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The authorizations corresponding to the criteria.</returns>
-    IAsyncEnumerable<TAuthorization> FindAsync(
-        string subject, string client,
-        string status, string type,
-        ImmutableArray<string> scopes, CancellationToken cancellationToken);
+        (string? Subject, string? ApplicationId, string? Status,
+         string? Type, ImmutableArray<string>? RequiredScopes) query, CancellationToken cancellationToken);
 
     /// <summary>
     /// Retrieves the list of authorizations corresponding to the specified application identifier.
@@ -117,7 +81,7 @@ public interface IOpenIddictAuthorizationStore<TAuthorization> where TAuthorizat
     /// <param name="identifier">The unique identifier associated with the authorization.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the authorization corresponding to the identifier.
     /// </returns>
     ValueTask<TAuthorization?> FindByIdAsync(string identifier, CancellationToken cancellationToken);
@@ -150,7 +114,7 @@ public interface IOpenIddictAuthorizationStore<TAuthorization> where TAuthorizat
     /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the first element returned when executing the query.
     /// </returns>
     ValueTask<TResult?> GetAsync<TState, TResult>(
@@ -267,17 +231,43 @@ public interface IOpenIddictAuthorizationStore<TAuthorization> where TAuthorizat
         TState state, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Removes the authorizations that are marked as invalid and the ad-hoc ones that have no token attached.
+    /// Removes the authorizations that are marked as invalid and don't have any token attached.
     /// Only authorizations created before the specified <paramref name="threshold"/> are removed.
     /// </summary>
     /// <remarks>
-    /// To ensure ad-hoc authorizations that no longer have any valid/non-expired token
-    /// attached are correctly removed, the tokens should always be pruned first.
+    /// Since authorizations with tokens still attached are not deleted, tokens should always be pruned first.
     /// </remarks>
     /// <param name="threshold">The date before which authorizations are not pruned.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
-    ValueTask PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken);
+    /// <returns>The number of authorizations that were removed.</returns>
+    ValueTask<long> PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes all the authorizations matching the specified parameters.
+    /// </summary>
+    /// <param name="subject">The subject associated with the authorization, or <see langword="null"/> not to filter out specific subjects.</param>
+    /// <param name="client">The client associated with the authorization, or <see langword="null"/> not to filter out specific clients.</param>
+    /// <param name="status">The authorization status, or <see langword="null"/> not to filter out specific authorization statuses.</param>
+    /// <param name="type">The authorization type, or <see langword="null"/> not to filter out specific authorization types.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of authorizations corresponding to the criteria that were marked as revoked.</returns>
+    ValueTask<long> RevokeAsync(string? subject, string? client, string? status, string? type, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes all the authorizations associated with the specified application identifier.
+    /// </summary>
+    /// <param name="identifier">The application identifier associated with the authorizations.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of authorizations associated with the specified application that were marked as revoked.</returns>
+    ValueTask<long> RevokeByApplicationIdAsync(string identifier, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes all the authorizations associated with the specified subject.
+    /// </summary>
+    /// <param name="subject">The subject associated with the authorizations.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of authorizations associated with the specified subject that were marked as revoked.</returns>
+    ValueTask<long> RevokeBySubjectAsync(string subject, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sets the application identifier associated with an authorization.

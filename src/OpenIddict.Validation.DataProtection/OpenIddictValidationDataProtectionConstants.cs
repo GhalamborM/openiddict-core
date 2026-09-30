@@ -15,12 +15,13 @@ public static class OpenIddictValidationDataProtectionConstants
         public const string Audiences = ".audiences";
         public const string CodeChallenge = ".code_challenge";
         public const string CodeChallengeMethod = ".code_challenge_method";
-        public const string DataProtector = ".data_protector";
         public const string DeviceCodeId = ".device_code_id";
         public const string DeviceCodeLifetime = ".device_code_lifetime";
         public const string Expires = ".expires";
+        public const string HostProperties = ".host_properties";
         public const string IdentityTokenLifetime = ".identity_token_lifetime";
         public const string InternalAuthorizationId = ".internal_authorization_id";
+        public const string InternalSessionId = ".internal_session_id";
         public const string InternalTokenId = ".internal_token_id";
         public const string Issued = ".issued";
         public const string Nonce = ".nonce";

@@ -4,6 +4,7 @@
  * the license and the contributors participating to this project.
  */
 
+using System.ComponentModel;
 using Microsoft.Extensions.Options;
 
 namespace OpenIddict.Server.Owin;
@@ -11,30 +12,37 @@ namespace OpenIddict.Server.Owin;
 /// <summary>
 /// Contains the methods required to ensure that the OpenIddict server configuration is valid.
 /// </summary>
-public class OpenIddictServerOwinConfiguration : IConfigureOptions<OpenIddictServerOptions>,
-                                                 IPostConfigureOptions<OpenIddictServerOwinOptions>
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictServerOwinConfiguration : IConfigureOptions<OpenIddictServerOptions>,
+                                                        IPostConfigureOptions<OpenIddictServerOptions>
 {
+    /// <inheritdoc/>
     public void Configure(OpenIddictServerOptions options)
     {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
+        ArgumentNullException.ThrowIfNull(options);
 
         // Register the built-in event handlers used by the OpenIddict OWIN server components.
         options.Handlers.AddRange(OpenIddictServerOwinHandlers.DefaultHandlers);
+
+        // Enable client_secret_basic support by default.
+        options.ClientAuthenticationMethods.Add(ClientAuthenticationMethods.ClientSecretBasic);
     }
 
-    public void PostConfigure(string name, OpenIddictServerOwinOptions options)
+    /// <inheritdoc/>
+    public void PostConfigure(string? name, OpenIddictServerOptions options)
     {
-        if (options is null)
+        ArgumentNullException.ThrowIfNull(options);
+
+        // Enable tls_client_auth and self_signed_tls_client_auth support if the
+        // corresponding chain policies have been configured in the server options.
+        if (options.PublicKeyInfrastructureTlsClientAuthenticationPolicy is not null)
         {
-            throw new ArgumentNullException(nameof(options));
+            options.ClientAuthenticationMethods.Add(ClientAuthenticationMethods.TlsClientAuth);
         }
 
-        if (options.AuthenticationMode == AuthenticationMode.Active)
+        if (options.SelfSignedTlsClientAuthenticationPolicy is not null)
         {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0119));
+            options.ClientAuthenticationMethods.Add(ClientAuthenticationMethods.SelfSignedTlsClientAuth);
         }
     }
 }

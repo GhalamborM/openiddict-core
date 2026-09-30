@@ -4,12 +4,14 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Diagnostics.CodeAnalysis;
+
 namespace OpenIddict.Abstractions;
 
 /// <summary>
 /// Provides methods allowing to cache applications after retrieving them from the store.
 /// </summary>
-/// <typeparam name="TApplication">The type of the Application entity.</typeparam>
+/// <typeparam name="TApplication">The type of the application entity.</typeparam>
 public interface IOpenIddictApplicationCache<TApplication> where TApplication : class
 {
     /// <summary>
@@ -43,20 +45,22 @@ public interface IOpenIddictApplicationCache<TApplication> where TApplication : 
     ValueTask<TApplication?> FindByIdAsync(string identifier, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Retrieves all the applications associated with the specified redirect_uri.
+    /// Retrieves all the applications associated with the specified post_logout_redirect_uri.
     /// </summary>
-    /// <param name="address">The redirect_uri associated with the applications.</param>
+    /// <param name="uri">The post_logout_redirect_uri associated with the applications.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The client applications corresponding to the specified redirect_uri.</returns>
-    IAsyncEnumerable<TApplication> FindByPostLogoutRedirectUriAsync(string address, CancellationToken cancellationToken);
+    IAsyncEnumerable<TApplication> FindByPostLogoutRedirectUriAsync(
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken);
 
     /// <summary>
     /// Retrieves all the applications associated with the specified redirect_uri.
     /// </summary>
-    /// <param name="address">The redirect_uri associated with the applications.</param>
+    /// <param name="uri">The redirect_uri associated with the applications.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The client applications corresponding to the specified redirect_uri.</returns>
-    IAsyncEnumerable<TApplication> FindByRedirectUriAsync(string address, CancellationToken cancellationToken);
+    IAsyncEnumerable<TApplication> FindByRedirectUriAsync(
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken);
 
     /// <summary>
     /// Removes the specified application from the cache.

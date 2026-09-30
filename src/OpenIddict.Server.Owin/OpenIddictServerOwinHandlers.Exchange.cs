@@ -12,11 +12,14 @@ public static partial class OpenIddictServerOwinHandlers
 {
     public static class Exchange
     {
-        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
+        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } =
+        [
             /*
              * Token request extraction:
              */
             ExtractPostRequest<ExtractTokenRequestContext>.Descriptor,
+            ValidateClientAuthenticationMethod<ExtractTokenRequestContext>.Descriptor,
+            ExtractClientCertificate<ExtractTokenRequestContext>.Descriptor,
             ExtractBasicAuthenticationCredentials<ExtractTokenRequestContext>.Descriptor,
 
             /*
@@ -28,8 +31,11 @@ public static partial class OpenIddictServerOwinHandlers
              * Token response processing:
              */
             AttachHttpResponseCode<ApplyTokenResponseContext>.Descriptor,
+            AttachOwinResponseChallenge<ApplyTokenResponseContext>.Descriptor,
+            SuppressFormsAuthenticationRedirect<ApplyTokenResponseContext>.Descriptor,
             AttachCacheControlHeader<ApplyTokenResponseContext>.Descriptor,
             AttachWwwAuthenticateHeader<ApplyTokenResponseContext>.Descriptor,
-            ProcessJsonResponse<ApplyTokenResponseContext>.Descriptor);
+            ProcessJsonResponse<ApplyTokenResponseContext>.Descriptor
+        ];
     }
 }

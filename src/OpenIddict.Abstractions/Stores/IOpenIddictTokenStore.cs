@@ -12,7 +12,7 @@ namespace OpenIddict.Abstractions;
 /// <summary>
 /// Provides methods allowing to manage the tokens stored in a database.
 /// </summary>
-/// <typeparam name="TToken">The type of the Token entity.</typeparam>
+/// <typeparam name="TToken">The type of the token entity.</typeparam>
 public interface IOpenIddictTokenStore<TToken> where TToken : class
 {
     /// <summary>
@@ -20,7 +20,7 @@ public interface IOpenIddictTokenStore<TToken> where TToken : class
     /// </summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of applications in the database.
     /// </returns>
     ValueTask<long> CountAsync(CancellationToken cancellationToken);
@@ -28,14 +28,18 @@ public interface IOpenIddictTokenStore<TToken> where TToken : class
     /// <summary>
     /// Determines the number of tokens that match the specified query.
     /// </summary>
+    /// <typeparam name="TState">The state type.</typeparam>
     /// <typeparam name="TResult">The result type.</typeparam>
     /// <param name="query">The query to execute.</param>
+    /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of tokens that match the specified query.
     /// </returns>
-    ValueTask<long> CountAsync<TResult>(Func<IQueryable<TToken>, IQueryable<TResult>> query, CancellationToken cancellationToken);
+    ValueTask<long> CountAsync<TState, TResult>(
+        Func<IQueryable<TToken>, TState, IQueryable<TResult>> query,
+        TState state, CancellationToken cancellationToken);
 
     /// <summary>
     /// Creates a new token.
@@ -54,39 +58,13 @@ public interface IOpenIddictTokenStore<TToken> where TToken : class
     ValueTask DeleteAsync(TToken token, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Retrieves the tokens corresponding to the specified
-    /// subject and associated with the application identifier.
+    /// Retrieves the tokens matching the specified query.
     /// </summary>
-    /// <param name="subject">The subject associated with the token.</param>
-    /// <param name="client">The client associated with the token.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The tokens corresponding to the subject/client.</returns>
-    IAsyncEnumerable<TToken> FindAsync(string subject, string client, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Retrieves the tokens matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the token.</param>
-    /// <param name="client">The client associated with the token.</param>
-    /// <param name="status">The token status.</param>
+    /// <param name="query">The query parameters: if a parameter is <see langword="null"/>, it will not be used to filter the results.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The tokens corresponding to the criteria.</returns>
     IAsyncEnumerable<TToken> FindAsync(
-        string subject, string client,
-        string status, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Retrieves the tokens matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the token.</param>
-    /// <param name="client">The client associated with the token.</param>
-    /// <param name="status">The token status.</param>
-    /// <param name="type">The token type.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The tokens corresponding to the criteria.</returns>
-    IAsyncEnumerable<TToken> FindAsync(
-        string subject, string client,
-        string status, string type, CancellationToken cancellationToken);
+        (string? Subject, string? ApplicationId, string? Status, string? Type) query, CancellationToken cancellationToken);
 
     /// <summary>
     /// Retrieves the list of tokens corresponding to the specified application identifier.
@@ -110,19 +88,21 @@ public interface IOpenIddictTokenStore<TToken> where TToken : class
     /// <param name="identifier">The unique identifier associated with the token.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the token corresponding to the unique identifier.
     /// </returns>
     ValueTask<TToken?> FindByIdAsync(string identifier, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Retrieves the list of tokens corresponding to the specified reference identifier.
-    /// Note: the reference identifier may be hashed or encrypted for security reasons.
+    /// Retrieves a token using its unique reference identifier.
     /// </summary>
+    /// <remarks>
+    /// Note: the reference identifier may be hashed or encrypted for security reasons.
+    /// </remarks>
     /// <param name="identifier">The reference identifier associated with the tokens.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the tokens corresponding to the specified reference identifier.
     /// </returns>
     ValueTask<TToken?> FindByReferenceIdAsync(string identifier, CancellationToken cancellationToken);
@@ -155,7 +135,7 @@ public interface IOpenIddictTokenStore<TToken> where TToken : class
     /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the first element returned when executing the query.
     /// </returns>
     ValueTask<TResult?> GetAsync<TState, TResult>(
@@ -253,6 +233,17 @@ public interface IOpenIddictTokenStore<TToken> where TToken : class
     ValueTask<string?> GetReferenceIdAsync(TToken token, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Retrieves the optional session identifier associated with a token.
+    /// </summary>
+    /// <param name="token">The token.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns the session identifier associated with the token.
+    /// </returns>
+    ValueTask<string?> GetSessionIdAsync(TToken token, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Retrieves the status associated with a token.
     /// </summary>
     /// <param name="token">The token.</param>
@@ -323,8 +314,43 @@ public interface IOpenIddictTokenStore<TToken> where TToken : class
     /// </summary>
     /// <param name="threshold">The date before which tokens are not pruned.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
-    ValueTask PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken);
+    /// <returns>The number of tokens that were removed.</returns>
+    ValueTask<long> PruneAsync(DateTimeOffset threshold, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes all the tokens matching the specified parameters.
+    /// </summary>
+    /// <param name="subject">The subject associated with the token, or <see langword="null"/> not to filter out specific subjects.</param>
+    /// <param name="client">The client associated with the token, or <see langword="null"/> not to filter out specific clients.</param>
+    /// <param name="status">The token status, or <see langword="null"/> not to filter out specific token statuses.</param>
+    /// <param name="type">The token type, or <see langword="null"/> not to filter out specific token types.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of tokens corresponding to the criteria that were marked as revoked.</returns>
+    ValueTask<long> RevokeAsync(string? subject, string? client, string? status, string? type, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes all the tokens associated with the specified application identifier.
+    /// </summary>
+    /// <param name="identifier">The application identifier associated with the tokens.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of tokens associated with the specified application that were marked as revoked.</returns>
+    ValueTask<long> RevokeByApplicationIdAsync(string identifier, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes all the tokens associated with the specified authorization identifier.
+    /// </summary>
+    /// <param name="identifier">The authorization identifier associated with the tokens.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of tokens associated with the specified authorization that were marked as revoked.</returns>
+    ValueTask<long> RevokeByAuthorizationIdAsync(string identifier, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Revokes all the tokens associated with the specified subject.
+    /// </summary>
+    /// <param name="subject">The subject associated with the tokens.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>The number of tokens associated with the specified subject that were marked as revoked.</returns>
+    ValueTask<long> RevokeBySubjectAsync(string subject, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sets the application identifier associated with a token.
@@ -343,6 +369,15 @@ public interface IOpenIddictTokenStore<TToken> where TToken : class
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
     ValueTask SetAuthorizationIdAsync(TToken token, string? identifier, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sets the session identifier associated with a token.
+    /// </summary>
+    /// <param name="token">The token.</param>
+    /// <param name="identifier">The unique identifier associated with the token.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
+    ValueTask SetSessionIdAsync(TToken token, string? identifier, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sets the creation date associated with a token.

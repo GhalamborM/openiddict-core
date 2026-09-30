@@ -4,10 +4,14 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Collections.Immutable;
+using System.Net.Http;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
 using Moq;
 using Xunit;
 using static OpenIddict.Server.OpenIddictServerEvents;
@@ -47,7 +51,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ExtractIntrospectionRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ExtractIntrospectionRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -59,7 +63,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -92,7 +96,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -118,7 +122,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -148,6 +152,162 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.Equal(Errors.InvalidRequest, response.Error);
         Assert.Equal(SR.FormatID2029(Parameters.Token), response.ErrorDescription);
         Assert.Equal(SR.FormatID8000(SR.ID2029), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateIntrospectionRequest_RequestIsRejectedWhenClientAssertionIsSpecifiedWithoutType()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
+        {
+            ClientAssertion = "2YotnFZFEjr1zCsicMWpAA",
+            ClientAssertionType = null,
+            ClientId = "Fabrikam",
+            Token = "2YotnFZFEjr1zCsicMWpAA"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.FormatID2037(Parameters.ClientAssertionType, Parameters.ClientAssertion), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2037), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateIntrospectionRequest_RequestIsRejectedWhenClientAssertionTypeIsSpecifiedWithoutAssertion()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
+        {
+            ClientAssertion = null,
+            ClientAssertionType = ClientAssertionTypes.JwtBearer,
+            ClientId = "Fabrikam",
+            Token = "2YotnFZFEjr1zCsicMWpAA"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.FormatID2037(Parameters.ClientAssertion, Parameters.ClientAssertionType), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2037), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateIntrospectionRequest_RequestIsRejectedWhenUnsupportedClientAssertionTypeIsSpecified()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.Configure(options => options.ClientAuthenticationMethods.Remove(ClientAuthenticationMethods.PrivateKeyJwt));
+            options.Configure(options => options.ClientAssertionTypes.Remove(ClientAssertionTypes.JwtBearer));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
+        {
+            ClientAssertion = "2YotnFZFEjr1zCsicMWpAA",
+            ClientAssertionType = ClientAssertionTypes.JwtBearer,
+            ClientId = "Fabrikam",
+            Token = "2YotnFZFEjr1zCsicMWpAA"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidClient, response.Error);
+        Assert.Equal(SR.FormatID2032(Parameters.ClientAssertionType), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2032), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateIntrospectionRequest_RequestIsRejectedWhenMultipleCredentialsAreSpecified()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
+        {
+            ClientAssertion = "2YotnFZFEjr1zCsicMWpAA",
+            ClientAssertionType = ClientAssertionTypes.JwtBearer,
+            ClientId = "Fabrikam",
+            ClientSecret = "7Fjfp0ZBr1KtDRbnfVdmIw",
+            Token = "2YotnFZFEjr1zCsicMWpAA"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.GetResourceString(SR.ID2087), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2087), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateIntrospectionRequest_RequestIsRejectedWhenEndpointPermissionIsNotGranted()
+    {
+        // Arrange
+        var application = new OpenIddictApplication();
+
+        var manager = CreateApplicationManager(mock =>
+        {
+            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(application);
+
+            mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
+            mock.Setup(manager => manager.HasPermissionAsync(application,
+                Permissions.Endpoints.Introspection, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+        });
+
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.AddEventHandler<ValidateTokenContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
+
+                    context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
+                        .SetTokenType(TokenTypeIdentifiers.RefreshToken);
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
+            });
+
+            options.Services.AddSingleton(manager);
+
+            options.Configure(options => options.IgnoreEndpointPermissions = false);
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            Token = "2YotnFZFEjr1zCsicMWpAA"
+        });
+
+        // Assert
+        Assert.Equal(Errors.UnauthorizedClient, response.Error);
+        Assert.Equal(SR.GetResourceString(SR.ID2075), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2075), response.ErrorUri);
+
+        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(application,
+            Permissions.Endpoints.Introspection, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
@@ -190,10 +350,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("SlAV32hkKG", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.RefreshToken)
-                        .SetExpirationDate(DateTimeOffset.UtcNow - TimeSpan.FromDays(1));
+                        .SetTokenType(TokenTypeIdentifiers.RefreshToken)
+                        .SetExpirationDate(TimeProvider.System.GetUtcNow() - TimeSpan.FromDays(1));
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -218,11 +378,10 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Theory]
-    [InlineData(TokenTypeHints.AuthorizationCode)]
-    [InlineData(TokenTypeHints.DeviceCode)]
-    [InlineData(TokenTypeHints.IdToken)]
-    [InlineData(TokenTypeHints.UserCode)]
-    [InlineData("custom_token")]
+    [InlineData(TokenTypeIdentifiers.Private.AuthorizationCode)]
+    [InlineData(TokenTypeIdentifiers.Private.DeviceCode)]
+    [InlineData(TokenTypeIdentifiers.IdentityToken)]
+    [InlineData(TokenTypeIdentifiers.Private.UserCode)]
     public async Task ValidateIntrospectionRequest_UnsupportedTokenTypeCausesAnError(string type)
     {
         // Arrange
@@ -239,7 +398,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
                         .SetTokenType(type);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -278,11 +437,11 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetAudiences("AdventureWorks")
                         .SetPresenters("Contoso");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -322,10 +481,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("8xLOxBtZp8", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.RefreshToken)
+                        .SetTokenType(TokenTypeIdentifiers.RefreshToken)
                         .SetPresenters("Contoso");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -350,225 +509,6 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.Equal(SR.FormatID8000(SR.ID2077), response.ErrorUri);
     }
 
-    [Fact]
-    public async Task ValidateIntrospectionRequest_RequestWithoutClientIdIsRejectedWhenClientIdentificationIsRequired()
-    {
-        // Arrange
-        await using var server = await CreateServerAsync(builder =>
-        {
-            builder.Configure(options => options.AcceptAnonymousClients = false);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
-        {
-            Token = "2YotnFZFEjr1zCsicMWpAA"
-        });
-
-        // Assert
-        Assert.Equal(Errors.InvalidClient, response.Error);
-        Assert.Equal(SR.FormatID2029(Parameters.ClientId), response.ErrorDescription);
-        Assert.Equal(SR.FormatID8000(SR.ID2029), response.ErrorUri);
-    }
-
-    [Fact]
-    public async Task ValidateIntrospectionRequest_RequestIsRejectedWhenClientCannotBeFound()
-    {
-        // Arrange
-        var manager = CreateApplicationManager(mock =>
-        {
-            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(value: null);
-        });
-
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.Services.AddSingleton(manager);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
-        {
-            ClientId = "Fabrikam",
-            ClientSecret = "7Fjfp0ZBr1KtDRbnfVdmIw",
-            Token = "2YotnFZFEjr1zCsicMWpAA"
-        });
-
-        // Assert
-        Assert.Equal(Errors.InvalidClient, response.Error);
-        Assert.Equal(SR.FormatID2052(Parameters.ClientId), response.ErrorDescription);
-        Assert.Equal(SR.FormatID8000(SR.ID2052), response.ErrorUri);
-
-        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task ValidateIntrospectionRequest_RequestIsRejectedWhenEndpointPermissionIsNotGranted()
-    {
-        // Arrange
-        var application = new OpenIddictApplication();
-
-        var manager = CreateApplicationManager(mock =>
-        {
-            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(application);
-
-            mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
-
-            mock.Setup(manager => manager.HasPermissionAsync(application,
-                Permissions.Endpoints.Introspection, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-        });
-
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.Services.AddSingleton(manager);
-
-            options.Configure(options => options.IgnoreEndpointPermissions = false);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
-        {
-            ClientId = "Fabrikam",
-            Token = "2YotnFZFEjr1zCsicMWpAA"
-        });
-
-        // Assert
-        Assert.Equal(Errors.UnauthorizedClient, response.Error);
-        Assert.Equal(SR.GetResourceString(SR.ID2075), response.ErrorDescription);
-        Assert.Equal(SR.FormatID8000(SR.ID2075), response.ErrorUri);
-
-        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(application,
-            Permissions.Endpoints.Introspection, It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task ValidateIntrospectionRequest_ClientSecretCannotBeUsedByPublicClients()
-    {
-        // Arrange
-        var application = new OpenIddictApplication();
-
-        var manager = CreateApplicationManager(mock =>
-        {
-            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(application);
-
-            mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
-        });
-
-        await using var server = await CreateServerAsync(builder =>
-        {
-            builder.Services.AddSingleton(manager);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
-        {
-            ClientId = "Fabrikam",
-            ClientSecret = "7Fjfp0ZBr1KtDRbnfVdmIw",
-            Token = "2YotnFZFEjr1zCsicMWpAA"
-        });
-
-        // Assert
-        Assert.Equal(Errors.InvalidClient, response.Error);
-        Assert.Equal(SR.FormatID2053(Parameters.ClientSecret), response.ErrorDescription);
-        Assert.Equal(SR.FormatID8000(SR.ID2053), response.ErrorUri);
-
-        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task ValidateIntrospectionRequest_ClientSecretIsRequiredForNonPublicClients()
-    {
-        // Arrange
-        var application = new OpenIddictApplication();
-
-        var manager = CreateApplicationManager(mock =>
-        {
-            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(application);
-
-            mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-        });
-
-        await using var server = await CreateServerAsync(builder =>
-        {
-            builder.Services.AddSingleton(manager);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
-        {
-            ClientId = "Fabrikam",
-            ClientSecret = null,
-            Token = "2YotnFZFEjr1zCsicMWpAA"
-        });
-
-        // Assert
-        Assert.Equal(Errors.InvalidClient, response.Error);
-        Assert.Equal(SR.FormatID2054(Parameters.ClientSecret), response.ErrorDescription);
-        Assert.Equal(SR.FormatID8000(SR.ID2054), response.ErrorUri);
-
-        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()), Times.Once());
-    }
-
-    [Fact]
-    public async Task ValidateIntrospectionRequest_RequestIsRejectedWhenClientCredentialsAreInvalid()
-    {
-        // Arrange
-        var application = new OpenIddictApplication();
-
-        var manager = CreateApplicationManager(mock =>
-        {
-            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(application);
-
-            mock.Setup(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-
-            mock.Setup(manager => manager.ValidateClientSecretAsync(application, "7Fjfp0ZBr1KtDRbnfVdmIw", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-        });
-
-        await using var server = await CreateServerAsync(options =>
-        {
-            options.Services.AddSingleton(manager);
-        });
-
-        await using var client = await server.CreateClientAsync();
-
-        // Act
-        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
-        {
-            ClientId = "Fabrikam",
-            ClientSecret = "7Fjfp0ZBr1KtDRbnfVdmIw",
-            Token = "2YotnFZFEjr1zCsicMWpAA"
-        });
-
-        // Assert
-
-        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.HasClientTypeAsync(application, ClientTypes.Public, It.IsAny<CancellationToken>()), Times.AtLeastOnce());
-        Mock.Get(manager).Verify(manager => manager.ValidateClientSecretAsync(application, "7Fjfp0ZBr1KtDRbnfVdmIw", It.IsAny<CancellationToken>()), Times.Once());
-    }
-
     [Theory]
     [InlineData("custom_error", null, null)]
     [InlineData("custom_error", "custom_description", null)]
@@ -577,7 +517,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ValidateIntrospectionRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ValidateIntrospectionRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -591,9 +531,9 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -604,7 +544,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -637,9 +577,9 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -655,7 +595,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -686,9 +626,9 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -699,7 +639,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -730,7 +670,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetAudiences("Fabrikam")
                         .SetPresenters("Contoso", "AdventureWorks Cycles")
                         .SetCreationDate(new DateTimeOffset(2016, 1, 1, 0, 0, 0, TimeSpan.Zero))
@@ -739,7 +679,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                         .SetClaim(Claims.Subject, "Bob le Magnifique")
                         .SetClaim(Claims.JwtId, "66B65AED-4033-4E9C-B975-A8CA7FB6FA79");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -762,7 +702,7 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.True((bool) response[Claims.Active]);
         Assert.Equal("66B65AED-4033-4E9C-B975-A8CA7FB6FA79", (string?) response[Claims.JwtId]);
         Assert.Equal(TokenTypes.Bearer, (string?) response[Claims.TokenType]);
-        Assert.Equal(TokenTypeHints.AccessToken, (string?) response[Claims.TokenUsage]);
+        Assert.Equal("access_token", (string?) response[Claims.TokenUsage]);
         Assert.Equal("http://localhost/", (string?) response[Claims.Issuer]);
         Assert.Equal("Bob le Magnifique", (string?) response[Claims.Subject]);
         Assert.Equal(1451606400, (long) response[Claims.IssuedAt]);
@@ -770,6 +710,99 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.Equal(1483228800, (long) response[Claims.ExpiresAt]);
         Assert.Equal("Fabrikam", (string?) response[Claims.Audience]);
         Assert.Equal("AdventureWorks Cycles", (string?) response[Claims.ClientId]);
+    }
+
+    [Fact]
+    public async Task HandleIntrospectionRequest_TokenTypeIsNotReturnedForProofOfPossessionToken()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.AddEventHandler<ValidateTokenContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
+
+                    context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
+                        .SetClaim(Claims.Subject, "Bob le Magnifique")
+                        .SetClaim(Claims.Confirmation, new JsonObject
+                        {
+                            [JsonWebKeyParameterNames.X5tS256] = "P6DKnG90blx5LFI_It2ZAwe6TVJt43YaPiCCErpLx9s"
+                        });
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
+            });
+
+            options.RemoveEventHandler(ValidateExpirationDate.Descriptor);
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
+        {
+            Token = "2YotnFZFEjr1zCsicMWpAA",
+            TokenTypeHint = TokenTypeHints.AccessToken
+        });
+
+        // Assert
+        Assert.True((bool) response[Claims.Active]);
+        Assert.Null((string?) response[Claims.TokenType]);
+    }
+
+    [Fact]
+    public async Task HandleIntrospectionRequest_ConfirmationClaimIsReturnedForProofOfPossessionToken()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.AddEventHandler<ValidateTokenContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
+
+                    context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
+                        .SetClaim(Claims.Subject, "Bob le Magnifique")
+                        .SetClaim(Claims.Confirmation, new JsonObject
+                        {
+                            [JsonWebKeyParameterNames.X5tS256] = "P6DKnG90blx5LFI_It2ZAwe6TVJt43YaPiCCErpLx9s",
+                            ["custom_property"] = "custom_value"
+                        });
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
+            });
+
+            options.RemoveEventHandler(ValidateExpirationDate.Descriptor);
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/introspect", new OpenIddictRequest
+        {
+            Token = "2YotnFZFEjr1zCsicMWpAA",
+            TokenTypeHint = TokenTypeHints.AccessToken
+        });
+
+        // Assert
+        Assert.True((bool) response[Claims.Active]);
+        Assert.Equal(2, response[Claims.Confirmation]?.Count);
+        Assert.Equal("P6DKnG90blx5LFI_It2ZAwe6TVJt43YaPiCCErpLx9s", (string?) response[Claims.Confirmation]?[JsonWebKeyParameterNames.X5tS256]);
+        Assert.Equal("custom_value", (string?) response[Claims.Confirmation]?["custom_property"]);
     }
 
     [Fact]
@@ -787,12 +820,12 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.RefreshToken)
+                        .SetTokenType(TokenTypeIdentifiers.RefreshToken)
                         .SetPresenters("Fabrikam")
                         .SetClaim(Claims.Username, "Bob")
                         .SetClaim("custom_claim", "secret_value");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -842,14 +875,14 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetAudiences("Fabrikam")
                         .SetPresenters("Contoso", "AdventureWorks Cycles")
                         .SetScopes(Scopes.OpenId, Scopes.Profile)
                         .SetClaim(Claims.Username, "Bob")
                         .SetClaim("custom_claim", "secret_value");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -908,10 +941,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                     identity.AddClaim(new Claim("object_claim", @"{""parameter"":""value""}", JsonClaimValueTypes.Json));
 
                     context.Principal = new ClaimsPrincipal(identity)
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetAudiences("Fabrikam");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -936,7 +969,7 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.Equal(JsonValueKind.True, ((JsonElement) response["boolean_claim"]).ValueKind);
         Assert.Equal(42, (long) response["integer_claim"]);
         Assert.Equal(JsonValueKind.Number, ((JsonElement) response["integer_claim"]).ValueKind);
-        Assert.Equal(new[] { "Contoso", "Fabrikam" }, (string[]?) response["array_claim"]);
+        Assert.Equal<IEnumerable<string?>?>(["Contoso", "Fabrikam"], (ImmutableArray<string?>?) response["array_claim"]);
         Assert.Equal(JsonValueKind.Array, ((JsonElement) response["array_claim"]).ValueKind);
         Assert.Equal("value", (string?) response["object_claim"]?["parameter"]);
         Assert.Equal(JsonValueKind.Object, ((JsonElement) response["object_claim"]).ValueKind);
@@ -982,10 +1015,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                     identity.AddClaim(new Claim("object_claim", @"{""parameter_2"":""value-2""}", JsonClaimValueTypes.Json));
 
                     context.Principal = new ClaimsPrincipal(identity)
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetAudiences("Fabrikam");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1102,10 +1135,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                         .SetAudiences("Fabrikam")
                         .SetAuthorizationId("18D15F73-BE2B-6867-DC01-B3C1E8AFDED0")
                         .SetTokenId("3E228451-1555-46F7-A471-951EFBA23A56")
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetClaim(Claims.Subject, "Bob le Magnifique");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1133,7 +1166,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                     .ReturnsAsync(token);
 
                 mock.Setup(manager => manager.GetTypeAsync(token, It.IsAny<CancellationToken>()))
-                    .ReturnsAsync(TokenTypeHints.AccessToken);
+                    .ReturnsAsync(TokenTypeIdentifiers.AccessToken);
 
                 mock.Setup(manager => manager.GetIdAsync(token, It.IsAny<CancellationToken>()))
                     .ReturnsAsync("3E228451-1555-46F7-A471-951EFBA23A56");
@@ -1145,6 +1178,17 @@ public abstract partial class OpenIddictServerIntegrationTests
                     .ReturnsAsync(token);
 
                 mock.Setup(manager => manager.HasStatusAsync(token, Statuses.Valid, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(true);
+
+                mock.Setup(manager => manager.HasTypeAsync(token, ImmutableArray.Create(new[]
+                {
+                    TokenTypeIdentifiers.AccessToken,
+                    TokenTypeIdentifiers.Private.AuthorizationCode,
+                    TokenTypeIdentifiers.Private.DeviceCode,
+                    TokenTypeIdentifiers.IdentityToken,
+                    TokenTypeIdentifiers.RefreshToken,
+                    TokenTypeIdentifiers.Private.UserCode
+                }), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(true);
 
                 mock.Setup(manager => manager.GetAuthorizationIdAsync(token, It.IsAny<CancellationToken>()))
@@ -1194,10 +1238,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                         .SetAudiences("Fabrikam")
                         .SetAuthorizationId("18D15F73-BE2B-6867-DC01-B3C1E8AFDED0")
                         .SetTokenId("3E228451-1555-46F7-A471-951EFBA23A56")
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetClaim(Claims.Subject, "Bob le Magnifique");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1225,7 +1269,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                     .ReturnsAsync(token);
 
                 mock.Setup(manager => manager.GetTypeAsync(token, It.IsAny<CancellationToken>()))
-                    .ReturnsAsync(TokenTypeHints.AccessToken);
+                    .ReturnsAsync(TokenTypeIdentifiers.AccessToken);
 
                 mock.Setup(manager => manager.GetIdAsync(token, It.IsAny<CancellationToken>()))
                     .ReturnsAsync("3E228451-1555-46F7-A471-951EFBA23A56");
@@ -1237,6 +1281,17 @@ public abstract partial class OpenIddictServerIntegrationTests
                     .ReturnsAsync(token);
 
                 mock.Setup(manager => manager.HasStatusAsync(token, Statuses.Valid, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(true);
+
+                mock.Setup(manager => manager.HasTypeAsync(token, ImmutableArray.Create(new[]
+                {
+                    TokenTypeIdentifiers.AccessToken,
+                    TokenTypeIdentifiers.Private.AuthorizationCode,
+                    TokenTypeIdentifiers.Private.DeviceCode,
+                    TokenTypeIdentifiers.IdentityToken,
+                    TokenTypeIdentifiers.RefreshToken,
+                    TokenTypeIdentifiers.Private.UserCode
+                }), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(true);
 
                 mock.Setup(manager => manager.GetAuthorizationIdAsync(token, It.IsAny<CancellationToken>()))
@@ -1293,10 +1348,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                         .SetAudiences("Fabrikam")
                         .SetAuthorizationId("18D15F73-BE2B-6867-DC01-B3C1E8AFDED0")
                         .SetTokenId("3E228451-1555-46F7-A471-951EFBA23A56")
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetClaim(Claims.Subject, "Bob le Magnifique");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1324,7 +1379,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                     .ReturnsAsync(token);
 
                 mock.Setup(manager => manager.GetTypeAsync(token, It.IsAny<CancellationToken>()))
-                    .ReturnsAsync(TokenTypeHints.AccessToken);
+                    .ReturnsAsync(TokenTypeIdentifiers.AccessToken);
 
                 mock.Setup(manager => manager.GetIdAsync(token, It.IsAny<CancellationToken>()))
                     .ReturnsAsync("3E228451-1555-46F7-A471-951EFBA23A56");
@@ -1336,6 +1391,17 @@ public abstract partial class OpenIddictServerIntegrationTests
                     .ReturnsAsync(token);
 
                 mock.Setup(manager => manager.HasStatusAsync(token, Statuses.Valid, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(true);
+
+                mock.Setup(manager => manager.HasTypeAsync(token, ImmutableArray.Create(new[]
+                {
+                    TokenTypeIdentifiers.AccessToken,
+                    TokenTypeIdentifiers.Private.AuthorizationCode,
+                    TokenTypeIdentifiers.Private.DeviceCode,
+                    TokenTypeIdentifiers.IdentityToken,
+                    TokenTypeIdentifiers.RefreshToken,
+                    TokenTypeIdentifiers.Private.UserCode
+                }), It.IsAny<CancellationToken>()))
                     .ReturnsAsync(true);
 
                 mock.Setup(manager => manager.GetAuthorizationIdAsync(token, It.IsAny<CancellationToken>()))
@@ -1378,7 +1444,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                 .ReturnsAsync(token);
 
             mock.Setup(manager => manager.GetTypeAsync(token, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(TokenTypeHints.AccessToken);
+                .ReturnsAsync(TokenTypeIdentifiers.AccessToken);
 
             mock.Setup(manager => manager.GetIdAsync(token, It.IsAny<CancellationToken>()))
                 .ReturnsAsync("3E228451-1555-46F7-A471-951EFBA23A56");
@@ -1391,6 +1457,17 @@ public abstract partial class OpenIddictServerIntegrationTests
 
             mock.Setup(manager => manager.HasStatusAsync(token, Statuses.Valid, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
+
+            mock.Setup(manager => manager.HasTypeAsync(token, ImmutableArray.Create(new[]
+            {
+                TokenTypeIdentifiers.AccessToken,
+                TokenTypeIdentifiers.Private.AuthorizationCode,
+                TokenTypeIdentifiers.Private.DeviceCode,
+                TokenTypeIdentifiers.IdentityToken,
+                TokenTypeIdentifiers.RefreshToken,
+                TokenTypeIdentifiers.Private.UserCode
+            }), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
         });
 
         await using var server = await CreateServerAsync(options =>
@@ -1405,10 +1482,10 @@ public abstract partial class OpenIddictServerIntegrationTests
                         .SetAudiences("Fabrikam")
                         .SetAuthorizationId("18D15F73-BE2B-6867-DC01-B3C1E8AFDED0")
                         .SetTokenId("3E228451-1555-46F7-A471-951EFBA23A56")
-                        .SetTokenType(TokenTypeHints.AccessToken)
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken)
                         .SetClaim(Claims.Subject, "Bob le Magnifique");
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1460,7 +1537,7 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task HandleIntrospectionRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task HandleIntrospectionRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
@@ -1474,9 +1551,9 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1487,7 +1564,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1520,9 +1597,9 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1538,7 +1615,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1569,9 +1646,9 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1582,7 +1659,7 @@ public abstract partial class OpenIddictServerIntegrationTests
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1613,9 +1690,9 @@ public abstract partial class OpenIddictServerIntegrationTests
                     Assert.Equal("2YotnFZFEjr1zCsicMWpAA", context.Token);
 
                     context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
-                        .SetTokenType(TokenTypeHints.AccessToken);
+                        .SetTokenType(TokenTypeIdentifiers.AccessToken);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 });
 
                 builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
@@ -1631,7 +1708,7 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1659,13 +1736,9 @@ public abstract partial class OpenIddictServerIntegrationTests
                 builder.UseInlineHandler(context =>
                 {
                     context.Response["custom_parameter"] = "custom_value";
-                    context.Response["parameter_with_multiple_values"] = new[]
-                    {
-                        "custom_value_1",
-                        "custom_value_2"
-                    };
+                    context.Response["parameter_with_multiple_values"] = new(["custom_value_1", "custom_value_2"]);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -1679,6 +1752,6 @@ public abstract partial class OpenIddictServerIntegrationTests
 
         // Assert
         Assert.Equal("custom_value", (string?) response["custom_parameter"]);
-        Assert.Equal(new[] { "custom_value_1", "custom_value_2" }, (string[]?) response["parameter_with_multiple_values"]);
+        Assert.Equal<IEnumerable<string?>?>(["custom_value_1", "custom_value_2"], (ImmutableArray<string?>?) response["parameter_with_multiple_values"]);
     }
 }

@@ -20,13 +20,10 @@ public static class OpenIddictServerOwinHelpers
     /// middleware resolution (like Autofac), calling this method is NOT recommended.
     /// </summary>
     /// <param name="app">The application builder used to register middleware instances.</param>
-    /// <returns>The <see cref="IAppBuilder"/>.</returns>
+    /// <returns>The <see cref="IAppBuilder"/> instance.</returns>
     public static IAppBuilder UseOpenIddictServer(this IAppBuilder app)
     {
-        if (app is null)
-        {
-            throw new ArgumentNullException(nameof(app));
-        }
+        ArgumentNullException.ThrowIfNull(app);
 
         return app.Use<OpenIddictServerOwinMiddlewareFactory>();
     }
@@ -35,25 +32,13 @@ public static class OpenIddictServerOwinHelpers
     /// Retrieves the <see cref="IOwinRequest"/> instance stored in the <see cref="OpenIddictServerTransaction"/> properties.
     /// </summary>
     /// <param name="transaction">The transaction instance.</param>
-    /// <returns>The <see cref="IOwinRequest"/> instance or <c>null</c> if it couldn't be found.</returns>
+    /// <returns>The <see cref="IOwinRequest"/> instance or <see langword="null"/> if it couldn't be found.</returns>
     public static IOwinRequest? GetOwinRequest(this OpenIddictServerTransaction transaction)
     {
-        if (transaction is null)
-        {
-            throw new ArgumentNullException(nameof(transaction));
-        }
+        ArgumentNullException.ThrowIfNull(transaction);
 
-        if (!transaction.Properties.TryGetValue(typeof(IOwinRequest).FullName!, out object? property))
-        {
-            return null;
-        }
-
-        if (property is WeakReference<IOwinRequest> reference && reference.TryGetTarget(out IOwinRequest? request))
-        {
-            return request;
-        }
-
-        return null;
+        return transaction.Properties.TryGetValue(typeof(IOwinRequest).FullName!, out object? property)
+            && property is IOwinRequest request ? request : null;
     }
 
     /// <summary>
@@ -63,10 +48,7 @@ public static class OpenIddictServerOwinHelpers
     /// <returns>The <see cref="OpenIddictServerEndpointType"/>.</returns>
     public static OpenIddictServerEndpointType GetOpenIddictServerEndpointType(this IOwinContext context)
     {
-        if (context is null)
-        {
-            throw new ArgumentNullException(nameof(context));
-        }
+        ArgumentNullException.ThrowIfNull(context);
 
         return context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName)?.EndpointType ?? default;
     }
@@ -78,10 +60,7 @@ public static class OpenIddictServerOwinHelpers
     /// <returns>The <see cref="OpenIddictRequest"/> instance or <c>null</c> if it couldn't be found.</returns>
     public static OpenIddictRequest? GetOpenIddictServerRequest(this IOwinContext context)
     {
-        if (context is null)
-        {
-            throw new ArgumentNullException(nameof(context));
-        }
+        ArgumentNullException.ThrowIfNull(context);
 
         return context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName)?.Request;
     }
@@ -93,10 +72,7 @@ public static class OpenIddictServerOwinHelpers
     /// <returns>The <see cref="OpenIddictResponse"/> instance or <c>null</c> if it couldn't be found.</returns>
     public static OpenIddictResponse? GetOpenIddictServerResponse(this IOwinContext context)
     {
-        if (context is null)
-        {
-            throw new ArgumentNullException(nameof(context));
-        }
+        ArgumentNullException.ThrowIfNull(context);
 
         return context.Get<OpenIddictServerTransaction>(typeof(OpenIddictServerTransaction).FullName)?.Response;
     }

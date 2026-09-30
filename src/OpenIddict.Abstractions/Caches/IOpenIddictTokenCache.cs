@@ -9,7 +9,7 @@ namespace OpenIddict.Abstractions;
 /// <summary>
 /// Provides methods allowing to cache tokens after retrieving them from the store.
 /// </summary>
-/// <typeparam name="TToken">The type of the Token entity.</typeparam>
+/// <typeparam name="TToken">The type of the token entity.</typeparam>
 public interface IOpenIddictTokenCache<TToken> where TToken : class
 {
     /// <summary>
@@ -21,37 +21,13 @@ public interface IOpenIddictTokenCache<TToken> where TToken : class
     ValueTask AddAsync(TToken token, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Retrieves the tokens corresponding to the specified
-    /// subject and associated with the application identifier.
+    /// Retrieves the tokens matching the specified query.
     /// </summary>
-    /// <param name="subject">The subject associated with the token.</param>
-    /// <param name="client">The client associated with the token.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The tokens corresponding to the subject/client.</returns>
-    IAsyncEnumerable<TToken> FindAsync(string subject, string client, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Retrieves the tokens matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the token.</param>
-    /// <param name="client">The client associated with the token.</param>
-    /// <param name="status">The token status.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns>The tokens corresponding to the criteria.</returns>
-    IAsyncEnumerable<TToken> FindAsync(string subject, string client, string status, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Retrieves the tokens matching the specified parameters.
-    /// </summary>
-    /// <param name="subject">The subject associated with the token.</param>
-    /// <param name="client">The client associated with the token.</param>
-    /// <param name="status">The token status.</param>
-    /// <param name="type">The token type.</param>
+    /// <param name="query">The query parameters: if a parameter is <see langword="null"/>, it will not be used to filter the results.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The tokens corresponding to the criteria.</returns>
     IAsyncEnumerable<TToken> FindAsync(
-        string subject, string client,
-        string status, string type, CancellationToken cancellationToken);
+        (string? Subject, string? ApplicationId, string? Status, string? Type) query, CancellationToken cancellationToken);
 
     /// <summary>
     /// Retrieves the list of tokens corresponding to the specified application identifier.
@@ -81,9 +57,11 @@ public interface IOpenIddictTokenCache<TToken> where TToken : class
     ValueTask<TToken?> FindByIdAsync(string identifier, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Retrieves the list of tokens corresponding to the specified reference identifier.
-    /// Note: the reference identifier may be hashed or encrypted for security reasons.
+    /// Retrieves a token using its unique reference identifier.
     /// </summary>
+    /// <remarks>
+    /// Note: the reference identifier may be hashed or encrypted for security reasons.
+    /// </remarks>
     /// <param name="identifier">The reference identifier associated with the tokens.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>

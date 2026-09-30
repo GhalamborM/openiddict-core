@@ -6,19 +6,22 @@
 
 using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using Microsoft.IdentityModel.Tokens;
 
 namespace OpenIddict.Abstractions;
 
 /// <summary>
 /// Provides methods allowing to manage the applications stored in the store.
-/// Note: this interface is not meant to be implemented by custom managers,
-/// that should inherit from the generic OpenIddictApplicationManager class.
-/// It is primarily intended to be used by services that cannot easily depend
-/// on the generic application manager. The actual application entity type
-/// is automatically determined at runtime based on the OpenIddict core options.
 /// </summary>
+/// <remarks>
+/// Note: this interface is not meant to be implemented by custom managers,
+/// that should inherit from the generic class. It is primarily intended to
+/// be used by services that cannot easily depend on the generic manager.
+/// </remarks>
 public interface IOpenIddictApplicationManager
 {
     /// <summary>
@@ -26,7 +29,7 @@ public interface IOpenIddictApplicationManager
     /// </summary>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of applications in the database.
     /// </returns>
     ValueTask<long> CountAsync(CancellationToken cancellationToken = default);
@@ -38,10 +41,26 @@ public interface IOpenIddictApplicationManager
     /// <param name="query">The query to execute.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the number of applications that match the specified query.
     /// </returns>
     ValueTask<long> CountAsync<TResult>(Func<IQueryable<object>, IQueryable<TResult>> query, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Determines the number of applications that match the specified query.
+    /// </summary>
+    /// <typeparam name="TState">The state type.</typeparam>
+    /// <typeparam name="TResult">The result type.</typeparam>
+    /// <param name="query">The query to execute.</param>
+    /// <param name="state">The optional state.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns the number of applications that match the specified query.
+    /// </returns>
+    ValueTask<long> CountAsync<TState, TResult>(
+        Func<IQueryable<object>, TState, IQueryable<TResult>> query,
+        TState state, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Creates a new application based on the specified descriptor.
@@ -51,7 +70,7 @@ public interface IOpenIddictApplicationManager
     /// <param name="descriptor">The application descriptor.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the unique identifier associated with the application.
     /// </returns>
     ValueTask<object> CreateAsync(OpenIddictApplicationDescriptor descriptor, CancellationToken cancellationToken = default);
@@ -71,6 +90,12 @@ public interface IOpenIddictApplicationManager
     /// Note: the default implementation automatically hashes the client
     /// secret before storing it in the database, for security reasons.
     /// </summary>
+    /// <remarks>
+    /// Note: client authentication based on shared secrets is not recommended and should
+    /// only be used for backward compatibility with legacy applications that only support
+    /// client secrets. When possible, consider using public/private key pairs or TLS client
+    /// certificates instead, as these client authentication methods are significantly safer.
+    /// </remarks>
     /// <param name="application">The application to create.</param>
     /// <param name="secret">The client secret associated with the application, if applicable.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
@@ -95,7 +120,7 @@ public interface IOpenIddictApplicationManager
     /// <param name="identifier">The client identifier associated with the application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the client application corresponding to the identifier.
     /// </returns>
     ValueTask<object?> FindByClientIdAsync(string identifier, CancellationToken cancellationToken = default);
@@ -106,7 +131,7 @@ public interface IOpenIddictApplicationManager
     /// <param name="identifier">The unique identifier associated with the application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the client application corresponding to the identifier.
     /// </returns>
     ValueTask<object?> FindByIdAsync(string identifier, CancellationToken cancellationToken = default);
@@ -114,18 +139,31 @@ public interface IOpenIddictApplicationManager
     /// <summary>
     /// Retrieves all the applications associated with the specified post_logout_redirect_uri.
     /// </summary>
-    /// <param name="address">The post_logout_redirect_uri associated with the applications.</param>
+    /// <param name="uri">The post_logout_redirect_uri associated with the applications.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The client applications corresponding to the specified post_logout_redirect_uri.</returns>
-    IAsyncEnumerable<object> FindByPostLogoutRedirectUriAsync(string address, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<object> FindByPostLogoutRedirectUriAsync(
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves all the applications associated with the specified redirect_uri.
     /// </summary>
-    /// <param name="address">The redirect_uri associated with the applications.</param>
+    /// <param name="uri">The redirect_uri associated with the applications.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>The client applications corresponding to the specified redirect_uri.</returns>
-    IAsyncEnumerable<object> FindByRedirectUriAsync(string address, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<object> FindByRedirectUriAsync(
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves the application type associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns the application type of the application (by default, "web").
+    /// </returns>
+    ValueTask<string?> GetApplicationTypeAsync(object application, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Executes the specified query and returns the first element.
@@ -134,7 +172,7 @@ public interface IOpenIddictApplicationManager
     /// <param name="query">The query to execute.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the first element returned when executing the query.
     /// </returns>
     ValueTask<TResult?> GetAsync<TResult>(
@@ -149,7 +187,7 @@ public interface IOpenIddictApplicationManager
     /// <param name="state">The optional state.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns the first element returned when executing the query.
     /// </returns>
     ValueTask<TResult?> GetAsync<TState, TResult>(
@@ -223,6 +261,17 @@ public interface IOpenIddictApplicationManager
     ValueTask<string?> GetIdAsync(object application, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Retrieves the JSON Web Key Set associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns the JSON Web Key Set associated with the application.
+    /// </returns>
+    ValueTask<JsonWebKeySet?> GetJsonWebKeySetAsync(object application, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Retrieves the localized display name associated with an application
     /// and corresponding to the current UI culture or one of its parents.
     /// If no matching value can be found, the non-localized value is returned.
@@ -261,7 +310,7 @@ public interface IOpenIddictApplicationManager
     ValueTask<ImmutableArray<string>> GetPermissionsAsync(object application, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Retrieves the logout callback addresses associated with an application.
+    /// Retrieves the post-logout redirect URIs associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
@@ -283,7 +332,20 @@ public interface IOpenIddictApplicationManager
     ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(object application, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Retrieves the callback addresses associated with an application.
+    /// Retrieves the PKI client certificate authentication policy enforced for this application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="policy">The base policy from which the returned instance will be derived.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation, whose
+    /// result returns the PKI client certificate authentication policy enforced for this application.
+    /// </returns>
+    ValueTask<X509ChainPolicy?> GetPublicKeyInfrastructureTlsClientAuthenticationPolicyAsync(
+        object application, X509ChainPolicy policy, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves the redirect URIs associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
@@ -305,12 +367,45 @@ public interface IOpenIddictApplicationManager
     ValueTask<ImmutableArray<string>> GetRequirementsAsync(object application, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Retrieves the self-signed client certificate authentication policy enforced for this application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="policy">The base policy from which the returned instance will be derived.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation, whose
+    /// result returns the self-signed client certificate authentication policy enforced for this application.
+    /// </returns>
+    ValueTask<X509ChainPolicy?> GetSelfSignedTlsClientAuthenticationPolicyAsync(
+        object application, X509ChainPolicy policy, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves the settings associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns all the settings associated with the application.
+    /// </returns>
+    ValueTask<ImmutableDictionary<string, string>> GetSettingsAsync(object application, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Determines whether a given application has the specified application type.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="type">The expected application type.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns><see langword="true"/> if the application has the specified application type, <see langword="false"/> otherwise.</returns>
+    ValueTask<bool> HasApplicationTypeAsync(object application, string type, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Determines whether a given application has the specified client type.
     /// </summary>
     /// <param name="application">The application.</param>
     /// <param name="type">The expected client type.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns><c>true</c> if the application has the specified client type, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the application has the specified client type, <see langword="false"/> otherwise.</returns>
     ValueTask<bool> HasClientTypeAsync(object application, string type, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -319,7 +414,7 @@ public interface IOpenIddictApplicationManager
     /// <param name="application">The application.</param>
     /// <param name="type">The expected consent type.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns><c>true</c> if the application has the specified consent type, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the application has the specified consent type, <see langword="false"/> otherwise.</returns>
     ValueTask<bool> HasConsentTypeAsync(object application, string type, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -328,7 +423,7 @@ public interface IOpenIddictApplicationManager
     /// <param name="application">The application.</param>
     /// <param name="permission">The permission.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns><c>true</c> if the application has been granted the specified permission, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the application has been granted the specified permission, <see langword="false"/> otherwise.</returns>
     ValueTask<bool> HasPermissionAsync(object application, string permission, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -337,7 +432,7 @@ public interface IOpenIddictApplicationManager
     /// <param name="application">The application.</param>
     /// <param name="requirement">The requirement.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
-    /// <returns><c>true</c> if the requirement has been enforced for the specified application, <c>false</c> otherwise.</returns>
+    /// <returns><see langword="true"/> if the requirement has been enforced for the specified application, <see langword="false"/> otherwise.</returns>
     ValueTask<bool> HasRequirementAsync(object application, string requirement, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -421,13 +516,19 @@ public interface IOpenIddictApplicationManager
     /// Note: the default implementation automatically hashes the client
     /// secret before storing it in the database, for security reasons.
     /// </summary>
+    /// <remarks>
+    /// Note: client authentication based on shared secrets is not recommended and should
+    /// only be used for backward compatibility with legacy applications that only support
+    /// client secrets. When possible, consider using public/private key pairs or TLS client
+    /// certificates instead, as these client authentication methods are significantly safer.
+    /// </remarks>
     /// <param name="application">The application to update.</param>
     /// <param name="secret">The client secret associated with the application.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
     /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.
     /// </returns>
-    ValueTask UpdateAsync(object application, string secret, CancellationToken cancellationToken = default);
+    ValueTask UpdateAsync(object application, string? secret, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Validates the application to ensure it's in a consistent state.
@@ -440,25 +541,77 @@ public interface IOpenIddictApplicationManager
     /// <summary>
     /// Validates the client_secret associated with an application.
     /// </summary>
+    /// <remarks>
+    /// Note: client authentication based on shared secrets is not recommended and should
+    /// only be used for backward compatibility with legacy applications that only support
+    /// client secrets. When possible, consider using public/private key pairs or TLS client
+    /// certificates instead, as these client authentication methods are significantly safer.
+    /// </remarks>
     /// <param name="application">The application.</param>
     /// <param name="secret">The secret that should be compared to the client_secret stored in the database.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns a boolean indicating whether the client secret was valid.
     /// </returns>
     ValueTask<bool> ValidateClientSecretAsync(object application, string secret, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Validates the post_logout_redirect_uri to ensure it's associated with an application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="uri">The URI that should be compared to one of the post_logout_redirect_uri stored in the database.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <remarks>Note: if no client_id parameter is specified in end session requests, this method may not be called.</remarks>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns a boolean indicating whether the post_logout_redirect_uri was valid.
+    /// </returns>
+    ValueTask<bool> ValidatePostLogoutRedirectUriAsync(object application,
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Validates the PKI client certificate to ensure it can be used by the specified application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="certificate">The certificate that should be compared to the certificates associated with the application.</param>
+    /// <param name="policy">The chain policy used to validate the certificate.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
+    /// whose result returns a boolean indicating whether the client certificate was valid.
+    /// </returns>
+    ValueTask<bool> ValidatePublicKeyInfrastructureTlsClientCertificateAsync(object application,
+        X509Certificate2 certificate, X509ChainPolicy policy, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Validates the redirect_uri to ensure it's associated with an application.
     /// </summary>
     /// <param name="application">The application.</param>
-    /// <param name="address">The address that should be compared to one of the redirect_uri stored in the database.</param>
+    /// <param name="uri">The URI that should be compared to one of the redirect_uri stored in the database.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
     /// <returns>
-    /// A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation,
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation,
     /// whose result returns a boolean indicating whether the redirect_uri was valid.
     /// </returns>
-    ValueTask<bool> ValidateRedirectUriAsync(object application, string address, CancellationToken cancellationToken = default);
+    ValueTask<bool> ValidateRedirectUriAsync(object application,
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Validates the self-signed client certificate to ensure it can be used by the specified application.
+    /// </summary>
+    /// <param name="application">The application.</param>
+    /// <param name="certificate">The certificate that should be compared to the certificates associated with the application.</param>
+    /// <param name="policy">The chain policy used to validate the certificate.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> that can be used to abort the operation.</param>
+    /// <returns>A <see cref="ValueTask"/> that can be used to monitor the asynchronous operation.</returns>
+    /// <returns>
+    /// A <see cref="ValueTask{TResult}"/> that can be used to monitor the asynchronous operation, whose
+    /// result returns a boolean indicating whether the self-signed client certificate was valid.
+    /// </returns>
+    ValueTask<bool> ValidateSelfSignedTlsClientCertificateAsync(
+        object application, X509Certificate2 certificate,
+        X509ChainPolicy policy, CancellationToken cancellationToken = default);
 }

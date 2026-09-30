@@ -5,37 +5,42 @@
  */
 
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using OpenIddict.EntityFrameworkCore.Models;
 
 namespace OpenIddict.EntityFrameworkCore;
 
 /// <summary>
-/// Defines a relational mapping for the Authorization entity.
+/// Defines a relational mapping for the authorization entity.
 /// </summary>
-/// <typeparam name="TAuthorization">The type of the Authorization entity.</typeparam>
-/// <typeparam name="TApplication">The type of the Application entity.</typeparam>
-/// <typeparam name="TToken">The type of the Token entity.</typeparam>
-/// <typeparam name="TKey">The type of the Key entity.</typeparam>
+/// <typeparam name="TAuthorization">The type of the authorization entity.</typeparam>
+/// <typeparam name="TApplication">The type of the application entity.</typeparam>
+/// <typeparam name="TSession">The type of the session entity.</typeparam>
+/// <typeparam name="TToken">The type of the token entity.</typeparam>
+/// <typeparam name="TKey">The type of the primary key.</typeparam>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public class OpenIddictEntityFrameworkCoreAuthorizationConfiguration<TAuthorization, TApplication, TToken, TKey> : IEntityTypeConfiguration<TAuthorization>
-    where TAuthorization : OpenIddictEntityFrameworkCoreAuthorization<TKey, TApplication, TToken>
-    where TApplication : OpenIddictEntityFrameworkCoreApplication<TKey, TAuthorization, TToken>
-    where TToken : OpenIddictEntityFrameworkCoreToken<TKey, TApplication, TAuthorization>
+public sealed class OpenIddictEntityFrameworkCoreAuthorizationConfiguration<
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TAuthorization,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TApplication,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSession,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TToken,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TKey> : IEntityTypeConfiguration<TAuthorization>
+    where TAuthorization : OpenIddictEntityFrameworkCoreAuthorization<TKey, TApplication, TSession, TToken>
+    where TApplication : OpenIddictEntityFrameworkCoreApplication<TKey, TAuthorization, TSession, TToken>
+    where TSession : OpenIddictEntityFrameworkCoreSession<TKey, TApplication, TAuthorization, TToken>
+    where TToken : OpenIddictEntityFrameworkCoreToken<TKey, TApplication, TAuthorization, TSession>
     where TKey : notnull, IEquatable<TKey>
 {
     public void Configure(EntityTypeBuilder<TAuthorization> builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         // Warning: optional foreign keys MUST NOT be added as CLR properties because
         // Entity Framework would throw an exception due to the TKey generic parameter
         // being non-nullable when using value types like short, int, long or Guid.
-
-        builder.HasKey(authorization => authorization.Id);
 
         builder.HasIndex(
             nameof(OpenIddictEntityFrameworkCoreAuthorization.Application) + nameof(OpenIddictEntityFrameworkCoreApplication.Id),
@@ -43,28 +48,53 @@ public class OpenIddictEntityFrameworkCoreAuthorizationConfiguration<TAuthorizat
             nameof(OpenIddictEntityFrameworkCoreAuthorization.Subject),
             nameof(OpenIddictEntityFrameworkCoreAuthorization.Type));
 
-        builder.Property(authorization => authorization.ConcurrencyToken)
+        builder.Property(static authorization => authorization.ConcurrencyToken)
                .HasMaxLength(50)
                .IsConcurrencyToken();
 
-        builder.Property(authorization => authorization.Id)
+        builder.HasKey(static authorization => authorization.Id);
+
+        builder.Property(static authorization => authorization.Id)
                .ValueGeneratedOnAdd();
 
-        builder.Property(authorization => authorization.Status)
+        if (typeof(TKey) == typeof(string))
+        {
+            builder.Property(static authorization => authorization.Id)
+                   .HasMaxLength(100);
+        }
+
+        builder.Property(static authorization => authorization.Properties)
+               .HasConversion(
+                   static value => JsonSerializer.Serialize(value, OpenIddictSerializer.Default.IDictionaryStringJsonElement),
+                   static value => JsonSerializer.Deserialize(value, OpenIddictSerializer.Default.IDictionaryStringJsonElement),
+                   CreateDictionaryComparer<JsonElement>());
+
+        builder.HasMany(static authorization => authorization.Sessions)
+               .WithOne(static session => session.Authorization!)
+               .HasForeignKey(nameof(OpenIddictEntityFrameworkCoreSession.Authorization) +
+                              nameof(OpenIddictEntityFrameworkCoreAuthorization.Id))
+               .IsRequired(required: false);
+
+        builder.Property(static authorization => authorization.Status)
                .HasMaxLength(50);
 
-        builder.Property(authorization => authorization.Subject)
+        builder.Property(static authorization => authorization.Subject)
                .HasMaxLength(400);
 
-        builder.Property(authorization => authorization.Type)
-               .HasMaxLength(50);
-
-        builder.HasMany(authorization => authorization.Tokens)
-               .WithOne(token => token.Authorization!)
+        builder.HasMany(static authorization => authorization.Tokens)
+               .WithOne(static token => token.Authorization!)
                .HasForeignKey(nameof(OpenIddictEntityFrameworkCoreToken.Authorization) +
                               nameof(OpenIddictEntityFrameworkCoreAuthorization.Id))
                .IsRequired(required: false);
 
+        builder.Property(static authorization => authorization.Type)
+               .HasMaxLength(50);
+
         builder.ToTable("OpenIddictAuthorizations");
+
+        static ValueComparer CreateDictionaryComparer<TValue>() => new ValueComparer<IDictionary<string, TValue>>(
+            static (left, right) => ReferenceEquals(left, right) || (left != null && right != null && left.SequenceEqual(right)),
+            static value => value.Aggregate(0, static (hash, value) => HashCode.Combine(hash, value)),
+            static value => value.ToDictionary());
     }
 }

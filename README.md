@@ -1,53 +1,44 @@
-﻿# OpenIddict
+# OpenIddict
 
 ### The OpenID Connect stack you'll be addicted to.
 
-[![Build status](https://github.com/openiddict/openiddict-core/workflows/build/badge.svg?branch=dev&event=push)](https://github.com/openiddict/openiddict-core/actions?query=workflow%3Abuild+branch%3Adev+event%3Apush)
+## What is OpenIddict?
 
-## What's OpenIddict?
+OpenIddict aims at providing a **versatile solution** to implement **OpenID Connect client, server and token validation support in .NET applications**.
 
-OpenIddict aims at providing a **versatile solution** to implement an **OpenID Connect server and token validation in any ASP.NET Core 2.1, 3.1 and 5.0 application**,
-and starting in OpenIddict 3.0, **any ASP.NET 4.x application using Microsoft.Owin too**.
+> [!TIP]
+> While the client, server and token validation features can be used in any ASP.NET 4.6.2+ or
+> [ASP.NET Core 2.3+ web application](https://documentation.openiddict.com/integrations/aspnet-core),
+> the client feature can also be used in
+> [Android, iOS, Linux, Mac Catalyst, macOS and Windows applications](https://documentation.openiddict.com/integrations/operating-systems)
+> to integrate with OpenIddict-based identity providers or any other OAuth 2.0/OpenID Connect-compliant implementation.
 
-OpenIddict fully supports the **[code/implicit/hybrid flows](http://openid.net/specs/openid-connect-core-1_0.html)**, the **[client credentials/resource owner password grants](https://tools.ietf.org/html/rfc6749)** and the [device authorization flow](https://tools.ietf.org/html/rfc8628). You can also create your own custom grant types.
+OpenIddict fully supports the **[code/implicit/hybrid flows](http://openid.net/specs/openid-connect-core-1_0.html)**,
+the **[client credentials/resource owner password grants](https://datatracker.ietf.org/doc/html/rfc6749)**,
+the [device authorization flow](https://datatracker.ietf.org/doc/html/rfc8628) and the **[token exchange grant](https://datatracker.ietf.org/doc/html/rfc8693)**.
 
-OpenIddict natively supports **[Entity Framework Core](https://www.nuget.org/packages/OpenIddict.EntityFrameworkCore)**, **[Entity Framework 6](https://www.nuget.org/packages/OpenIddict.EntityFramework)** and **[MongoDB](https://www.nuget.org/packages/OpenIddict.MongoDb)** out-of-the-box, but you can also provide your own stores.
+OpenIddict natively supports **[Entity Framework Core](https://www.nuget.org/packages/OpenIddict.EntityFrameworkCore)**,
+**[Entity Framework 6](https://www.nuget.org/packages/OpenIddict.EntityFramework)** and **[MongoDB](https://www.nuget.org/packages/OpenIddict.MongoDb)**
+out-of-the-box and custom stores can be implemented to support other providers.
 
-## I want something simple and easy to configure
-
-**Developers looking for a simple and turnkey solution are strongly encouraged to use [OrchardCore and its OpenID module](https://docs.orchardcore.net/en/dev/docs/reference/modules/OpenId/)**,
-which is based on OpenIddict, comes with sensible defaults and offers a built-in management GUI to easily register OpenID client applications.
+--------------
 
 ## Getting started
 
-To implement a custom OpenID Connect server using OpenIddict, read **[Getting started](https://documentation.openiddict.com/guide/getting-started.html)**.
+**To implement a custom OpenID Connect server using OpenIddict, read [Getting started](https://documentation.openiddict.com/guides/getting-started/)**.
 
-## Compatibility matrix
+**Samples demonstrating how to use OpenIddict with the different OAuth 2.0/OpenID Connect flows**
+can be found in the [dedicated repository](https://github.com/openiddict/openiddict-samples).
 
-| Web framework version | .NET runtime version | OpenIddict 3.x                          | OpenIddict 4.x (preview)                |
-|-----------------------|----------------------|-----------------------------------------|-----------------------------------------|
-| ASP.NET Core 2.1      | .NET Framework 4.6.1 | :heavy_check_mark: :information_source: | :heavy_check_mark: :information_source: |
-| ASP.NET Core 2.1      | .NET Framework 4.7.2 | :heavy_check_mark:                      | :heavy_check_mark:                      |
-| ASP.NET Core 2.1      | .NET Framework 4.8   | :heavy_check_mark:                      | :heavy_check_mark:                      |
-| ASP.NET Core 2.1      | .NET Core 2.1        | :heavy_check_mark:                      | :exclamation:                           |
-|                       |                      |                                         |                                         |
-| ASP.NET Core 3.1      | .NET Core 3.1        | :heavy_check_mark:                      | :heavy_check_mark:                      |
-|                       |                      |                                         |                                         |
-| ASP.NET Core 5.0      | .NET 5.0             | :heavy_check_mark:                      | :heavy_check_mark:                      |
-| ASP.NET Core 6.0      | .NET 6.0             | :heavy_check_mark:                      | :heavy_check_mark:                      |
-|                       |                      |                                         |                                         |
-| Microsoft.Owin 4.2    | .NET Framework 4.6.1 | :heavy_check_mark: :information_source: | :heavy_check_mark: :information_source: |
-| Microsoft.Owin 4.2    | .NET Framework 4.7.2 | :heavy_check_mark:                      | :heavy_check_mark:                      |
-| Microsoft.Owin 4.2    | .NET Framework 4.8   | :heavy_check_mark:                      | :heavy_check_mark:                      |
+**Developers looking for a simple and turnkey solution are strongly encouraged to evaluate [Volo.OpenIddict.Pro](https://abp.io/modules/Volo.OpenIddict.Pro)**,
+which is based on OpenIddict, supports all the common OAuth 2.0/OpenID Connect flows and offers a powerful applications/scopes management GUI.
 
-:exclamation: **Note: ASP.NET Core 2.1 on .NET Core 2.1 is no longer supported. While OpenIddict 4.x can still be used on .NET Core 2.1
-thanks to its .NET Standard 2.0 compatibility, users are strongly encouraged to migrate to ASP.NET Core/.NET 6.0**.
+> [!TIP]
+> **Looking to integrate with a SAML2P Identity Provider (IDP) or Service Provider (SP)?** Rock Solid Knowledge,
+> a sponsor of OpenIddict, is developing a range of identity components to enhance your OpenIddict solution.
+> The first of these is their popular [SAML2P component](https://www.openiddictcomponents.com/?utm_source=openiddictgithubmain&utm_campaign=openiddict).
 
-:information_source: **Note: the following features are not available when targeting .NET Framework 4.6.1**:
- - X.509 development encryption/signing certificates: calling `AddDevelopmentEncryptionCertificate()` or `AddDevelopmentSigningCertificate()`
-will result in a `PlatformNotSupportedException` being thrown at runtime if no valid development certificate can be found and a new one must be generated.
- - X.509 ECDSA signing certificates/keys: calling `AddSigningCertificate()` or `AddSigningKey()`
-with an ECDSA certificate/key will always result in a `PlatformNotSupportedException` being thrown at runtime.
+--------------
 
 ## Certification
 
@@ -58,6 +49,7 @@ While a reference implementation could be submitted as-is, **this wouldn't guara
 
 Instead, **developers are encouraged to execute the conformance tests against their own deployment** once they've implemented their own logic.
 
+> [!TIP]
 > The samples repository contains [a dedicated sample](https://github.com/openiddict/openiddict-samples/tree/dev/samples/Contruum/Contruum.Server) specially designed to be used
 > with the OpenID Connect Provider Certification tool and demonstrate that OpenIddict can be easily used in a certified implementation. To allow executing the certification tests
 > as fast as possible, that sample doesn't include any membership or consent feature (two hardcoded identities are proposed for tests that require switching between identities).
@@ -66,38 +58,45 @@ Instead, **developers are encouraged to execute the conformance tests against th
 
 ## Resources
 
-**Looking for additional resources to help you get started with 3.0?** Don't miss these interesting blog posts:
+**Looking for additional resources to help you get started with OpenIddict?** Don't miss these interesting blog posts:
 
-- **[How to Secure ASP.NET Core Applications with OpenIddict Using Virto Commerce B2B eCommerce: Tech Case Study](https://virtocommerce.com/blog/how-to-secure-aspnet-core-applications-with-openiddict-using-virto-commerce-platform)** by [Virto Commerce](https://virtocommerce.com/)
-- **[OpenIddict 3.0 general availability](https://kevinchalet.com/2020/12/23/openiddict-3-0-general-availability/)** by [Kévin Chalet](https://github.com/kevinchalet)
+- **[OpenIddict 7.0 is out](https://kevinchalet.com/2025/07/07/openiddict-7-0-is-out/)** by [Kévin Chalet](https://github.com/kevinchalet)
+- **[OpenIddict on AWS Serverless: adding interactive login](https://www.ganhammar.se/posts/openiddict-on-aws-serverless-with-interactive-login)** by [Anton Ganhammar](https://github.com/ganhammar)
+- **[OpenIddict on AWS Serverless: flexible OAuth 2.0/OIDC provider](https://www.ganhammar.se/posts/openiddict-on-aws-serverless-flexible-oauth2-oidc-provider)** by [Anton Ganhammar](https://github.com/ganhammar)
+- **[Transparent authentication gateway](https://alex-klaus.com/transparent-auth-gateway-1/)** by [Alex Klaus](https://github.com/aklaus)
+- **[Introducing system integration support for the OpenIddict client](https://kevinchalet.com/2023/02/27/introducing-system-integration-support-for-the-openiddict-client/)** by [Kévin Chalet](https://github.com/kevinchalet)
+- **[Getting started with the OpenIddict web providers](https://kevinchalet.com/2022/12/16/getting-started-with-the-openiddict-web-providers/)** by [Kévin Chalet](https://github.com/kevinchalet)
+- **[Introducing the OpenIddict-powered providers](https://github.com/aspnet-contrib/AspNet.Security.OAuth.Providers/issues/694)** by [Kévin Chalet](https://github.com/kevinchalet)
+- **[Introducing the OpenIddict client](https://kevinchalet.com/2022/02/25/introducing-the-openiddict-client/)** by [Kévin Chalet](https://github.com/kevinchalet)
+- **[Secure a Blazor WASM ASP.NET Core hosted app using BFF and OpenIddict](https://damienbod.com/2022/01/03/secure-a-blazor-wasm-asp-net-core-hosted-app-using-bff-and-openiddict/)** by [Damien Bowden](https://github.com/damienbod)
 - **[Setting up an Authorization Server with OpenIddict](https://dev.to/robinvanderknaap/setting-up-an-authorization-server-with-openiddict-part-i-introduction-4jid)** by [Robin van der Knaap](https://dev.to/robinvanderknaap)
-- **[Introducing OpenIddict 3.0's first release candidate version](https://kevinchalet.com/2020/11/17/introducing-openiddict-3-0-s-first-release-candidate-version/)** by [Kévin Chalet](https://github.com/kevinchalet)
-- **[OpenIddict 3.0 beta6 is out](https://kevinchalet.com/2020/10/27/openiddict-3-0-beta6-is-out/)** by [Kévin Chalet](https://github.com/kevinchalet)
-- **[Introducing Quartz.NET support and new languages in OpenIddict 3.0 beta4](https://kevinchalet.com/2020/10/02/introducing-quartz-net-support-and-new-languages-in-openiddict-3-0-beta4/)** by [Kévin Chalet](https://github.com/kevinchalet)
-- **[Introducing localization support in OpenIddict 3.0 beta3](https://kevinchalet.com/2020/08/03/introducing-localization-support-in-openiddict-3-0-beta3/)** by [Kévin Chalet](https://github.com/kevinchalet)
-- **[OpenIddict 3.0 beta2 is out](https://kevinchalet.com/2020/07/08/openiddict-3-0-beta2-is-out/)** by [Kévin Chalet](https://github.com/kevinchalet)
-- **[Introducing OpenIddict 3.0 beta1](https://kevinchalet.com/2020/06/11/introducing-openiddict-3-0-beta1/)** by [Kévin Chalet](https://github.com/kevinchalet)
 - **[Adding OpenIddict 3.0 to an OWIN application](https://kevinchalet.com/2020/03/03/adding-openiddict-3-0-to-an-owin-application/)** by [Kévin Chalet](https://github.com/kevinchalet)
 - **[Creating an OpenID Connect server proxy with OpenIddict 3.0's degraded mode](https://kevinchalet.com/2020/02/18/creating-an-openid-connect-server-proxy-with-openiddict-3-0-s-degraded-mode/)** by [Kévin Chalet](https://github.com/kevinchalet)
 
 **OpenIddict-based projects maintained by third parties**:
 
-- **[OrchardCore OpenID module](https://github.com/OrchardCMS/OrchardCore)**: turnkey OpenID Connect server and token validation solution, built with multitenancy in mind
+- **[ABP Framework OpenIddict module](https://abp.io/)**: full-stack Web application framework for .NET
+- **[OpenIddict.AmazonDynamoDB](https://github.com/ganhammar/OpenIddict.AmazonDynamoDB)** by [ganhammar](https://github.com/ganhammar): Amazon DynamoDB stores for OpenIddict
 - **[OpenIddict UI](https://github.com/thomasduft/openiddict-ui)** by [Thomas Duft](https://github.com/thomasduft): headless UI for managing client applications and scopes
+- **[OrchardCore OpenID module](https://github.com/OrchardCMS/OrchardCore)**: turnkey OpenID Connect server and token validation solution, built with multitenancy in mind
 - **[P41.OpenIddict.CouchDB](https://github.com/panoukos41/couchdb-openiddict)** by [Panos Athanasiou](https://github.com/panoukos41): CouchDB stores for OpenIddict
+- **[pixel-identity](https://github.com/Nfactor26/pixel-identity)** by [Nishant Singh](https://github.com/Nfactor26): Ready to host OpenID Connect service using OpenIddict and ASP.NET Identity with a Blazor-based UI for managing users, roles, applications and scopes with support for multiple databases.
+- **[SharpGrip.OpenIddict.Api](https://github.com/SharpGrip/OpenIddict.Api)** by [SharpGrip](https://github.com/SharpGrip): SharpGrip OpenIddict API is an extension of the OpenIddict library exposing the OpenIddict entities through a RESTful API.
+
+--------------
 
 ## Security policy
 
-Security issues and bugs should be reported privately by emailing security@openiddict.com.
-You should receive a response within 24 hours. If for some reason you do not, please follow up via email to ensure we received your original message.
+Security issues and bugs should be reported privately by email to [security@openiddict.com](mailto:security@openiddict.com).
+You should receive a response within 24 hours. If you do not, please follow up by email to ensure that your original message was received.
 
-## Support
+--------------
 
-If you need support, please make sure you [sponsor the project](https://github.com/sponsors/kevinchalet) before creating a GitHub ticket.
-If you're not a sponsor, you can post your questions on Gitter or StackOverflow:
+## Support policy
 
-- **Gitter: [https://gitter.im/openiddict/openiddict-core](https://gitter.im/openiddict/openiddict-core)**
-- **StackOverflow: [https://stackoverflow.com/questions/tagged/openiddict](https://stackoverflow.com/questions/tagged/openiddict)**
+For more information about the available support options, read [Support policy](https://openiddict.com/support).
+
+--------------
 
 ## Nightly builds
 
@@ -116,29 +115,32 @@ To reference the OpenIddict MyGet feed, **create a `NuGet.config` file** (at the
 
 ## Contributors
 
-**OpenIddict** is actively maintained by **[Kévin Chalet](https://github.com/kevinchalet)**. Contributions are welcome and can be submitted using pull requests.
+**OpenIddict** is actively maintained by **[Kévin Chalet](https://github.com/kevinchalet)**. Contributions are welcome and may be submitted through pull requests.
 
-**Special thanks to our sponsors for their incredible support**:
+**Special thanks to [our sponsors](https://github.com/sponsors/kevinchalet#sponsors) for their incredible support**:
 
-- [Sébastien Ros](https://github.com/sebastienros)
-- [mridentity](https://github.com/mridentity)
-- [Andrew](https://github.com/GDreyV)
-- [gustavdw](https://github.com/gustavdw)
-- [Gillardo](https://github.com/Gillardo)
-- [Dovydas Navickas](https://github.com/DovydasNavickas)
-- [Christian Schmitt](https://github.com/schmitch)
-- [Thomas W](https://github.com/ThreeScreenStudios)
-- [torfikarl](https://github.com/torfikarl)
-- [Lewis Cianci](https://github.com/lewcianci)
-- [Florian Wachs](https://github.com/florianwachs)
-- [Vasko Poposki](https://github.com/vaspop)
-- [Sebastian Stehle](https://github.com/SebastianStehle)
-- [Michael Hochriegl](https://github.com/MichaelHochriegl)
-- [sunielreddy](https://github.com/sunielreddy)
-- [Communicatie Cockpit](https://github.com/communicatie-cockpit)
-- [Keith Turner](https://github.com/KeithT)
-- [Virto Commerce](https://github.com/VirtoCommerce)
+<a href="https://volosoft.com/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://volosoft.com/assets/logos/volosoft-logo-light.svg">
+    <img src="https://volosoft.com/assets/logos/volosoft-logo-dark.svg" width="500px" alt="Volosoft logo" />
+  </picture>
+</a>
+
+<br />
+<br />
+
+<a href="https://www.openiddictcomponents.com/">
+  <img src="https://www.openiddictcomponents.com/img/openiddict-components-logo.png" width="400px" alt="OpenIddict Components logo" />
+</a>
+
+<br />
+<br />
+
+<!-- sponsors --><a href="https://github.com/sebastienros"><img src="https:&#x2F;&#x2F;github.com&#x2F;sebastienros.png" width="60px" alt="User avatar: Sébastien Ros" /></a><a href="https://github.com/SebastianStehle"><img src="https:&#x2F;&#x2F;github.com&#x2F;SebastianStehle.png" width="60px" alt="User avatar: Sebastian Stehle" /></a><a href="https://github.com/communicatie-cockpit"><img src="https:&#x2F;&#x2F;github.com&#x2F;communicatie-cockpit.png" width="60px" alt="User avatar: Communicatie Cockpit" /></a><a href="https://github.com/Skrypt"><img src="https:&#x2F;&#x2F;github.com&#x2F;Skrypt.png" width="60px" alt="User avatar: Jasmin Savard" /></a><a href="https://github.com/ThomasBjallas"><img src="https:&#x2F;&#x2F;github.com&#x2F;ThomasBjallas.png" width="60px" alt="User avatar: Thomas" /></a><a href="https://github.com/jonmartinsson"><img src="https:&#x2F;&#x2F;github.com&#x2F;jonmartinsson.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/EYERIDE-Fleet-Management-System"><img src="https:&#x2F;&#x2F;github.com&#x2F;EYERIDE-Fleet-Management-System.png" width="60px" alt="User avatar: EYERIDE Fleet Management System" /></a><a href="https://github.com/ravindUwU"><img src="https:&#x2F;&#x2F;github.com&#x2F;ravindUwU.png" width="60px" alt="User avatar: Ravindu Liyanapathirana" /></a><a href="https://github.com/ahanoff"><img src="https:&#x2F;&#x2F;github.com&#x2F;ahanoff.png" width="60px" alt="User avatar: Akhan Zhakiyanov" /></a><a href="https://github.com/blowdart"><img src="https:&#x2F;&#x2F;github.com&#x2F;blowdart.png" width="60px" alt="User avatar: Barry Dorrans" /></a><a href="https://github.com/devqsrl"><img src="https:&#x2F;&#x2F;github.com&#x2F;devqsrl.png" width="60px" alt="User avatar: DevQ S.r.l." /></a><a href="https://github.com/dgxhubbard"><img src="https:&#x2F;&#x2F;github.com&#x2F;dgxhubbard.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/forterro"><img src="https:&#x2F;&#x2F;github.com&#x2F;forterro.png" width="60px" alt="User avatar: Forterro" /></a><a href="https://github.com/MarcelMalik"><img src="https:&#x2F;&#x2F;github.com&#x2F;MarcelMalik.png" width="60px" alt="User avatar: Marcel" /></a><a href="https://github.com/BlauhausTechnology"><img src="https:&#x2F;&#x2F;github.com&#x2F;BlauhausTechnology.png" width="60px" alt="User avatar: Blauhaus Technology (Pty) Ltd" /></a><a href="https://github.com/trejjam"><img src="https:&#x2F;&#x2F;github.com&#x2F;trejjam.png" width="60px" alt="User avatar: Jan Trejbal" /></a><a href="https://github.com/aviationexam"><img src="https:&#x2F;&#x2F;github.com&#x2F;aviationexam.png" width="60px" alt="User avatar: Aviationexam s.r.o." /></a><a href="https://github.com/jeroenbai"><img src="https:&#x2F;&#x2F;github.com&#x2F;jeroenbai.png" width="60px" alt="User avatar: Jeroen Baidenmann" /></a><a href="https://github.com/Lombiq"><img src="https:&#x2F;&#x2F;github.com&#x2F;Lombiq.png" width="60px" alt="User avatar: Lombiq Technologies Ltd." /></a><a href="https://github.com/andrewbabbittdev"><img src="https:&#x2F;&#x2F;github.com&#x2F;andrewbabbittdev.png" width="60px" alt="User avatar: Andrew Babbitt" /></a><a href="https://github.com/stevenkuhn"><img src="https:&#x2F;&#x2F;github.com&#x2F;stevenkuhn.png" width="60px" alt="User avatar: Steven Kuhn" /></a><a href="https://github.com/softawaregmbh"><img src="https:&#x2F;&#x2F;github.com&#x2F;softawaregmbh.png" width="60px" alt="User avatar: softaware gmbh" /></a><a href="https://github.com/SingularSystems"><img src="https:&#x2F;&#x2F;github.com&#x2F;SingularSystems.png" width="60px" alt="User avatar: Singular Systems" /></a><a href="https://github.com/SCP-srl"><img src="https:&#x2F;&#x2F;github.com&#x2F;SCP-srl.png" width="60px" alt="User avatar: SCP-srl" /></a><a href="https://github.com/realisable"><img src="https:&#x2F;&#x2F;github.com&#x2F;realisable.png" width="60px" alt="User avatar: Realisable Software" /></a><a href="https://github.com/sfmskywalker"><img src="https:&#x2F;&#x2F;github.com&#x2F;sfmskywalker.png" width="60px" alt="User avatar: Sipke Schoorstra" /></a><a href="https://github.com/JamesHough"><img src="https:&#x2F;&#x2F;github.com&#x2F;JamesHough.png" width="60px" alt="User avatar: James Hough" /></a><a href="https://github.com/kaputsyn"><img src="https:&#x2F;&#x2F;github.com&#x2F;kaputsyn.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/jberzy"><img src="https:&#x2F;&#x2F;github.com&#x2F;jberzy.png" width="60px" alt="User avatar: " /></a><a href="https://github.com/arwin-swapna"><img src="https:&#x2F;&#x2F;github.com&#x2F;arwin-swapna.png" width="60px" alt="User avatar: Arwin" /></a><a href="https://github.com/zunda-inc"><img src="https:&#x2F;&#x2F;github.com&#x2F;zunda-inc.png" width="60px" alt="User avatar: ZUNDA Inc." /></a><a href="https://github.com/antonypetras"><img src="https:&#x2F;&#x2F;github.com&#x2F;antonypetras.png" width="60px" alt="User avatar: Antony Petras" /></a><!-- sponsors -->
+
+--------------
 
 ## License
 
-This project is licensed under the **Apache License**. This means that you can use, modify and distribute it freely. See [http://www.apache.org/licenses/LICENSE-2.0.html](http://www.apache.org/licenses/LICENSE-2.0.html) for more details.
+This project is licensed under the **Apache License**. This means that you can use, modify and distribute it freely.
+See [http://www.apache.org/licenses/LICENSE-2.0.html](http://www.apache.org/licenses/LICENSE-2.0.html) for more details.

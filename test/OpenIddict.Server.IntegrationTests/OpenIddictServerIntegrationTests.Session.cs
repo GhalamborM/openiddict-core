@@ -4,10 +4,15 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Collections.Immutable;
+using System.Net.Http;
+using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 using static OpenIddict.Server.OpenIddictServerEvents;
+using static OpenIddict.Server.OpenIddictServerHandlers;
+using static OpenIddict.Server.OpenIddictServerHandlers.Protection;
 
 namespace OpenIddict.Server.IntegrationTests;
 
@@ -19,14 +24,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(nameof(HttpMethod.Options))]
     [InlineData(nameof(HttpMethod.Put))]
     [InlineData(nameof(HttpMethod.Trace))]
-    public async Task ExtractLogoutRequest_UnexpectedMethodReturnsAnError(string method)
+    public async Task ExtractEndSessionRequest_UnexpectedMethodReturnsAnError(string method)
     {
         // Arrange
         await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.SendAsync(method, "/connect/logout", new OpenIddictRequest());
+        var response = await client.SendAsync(method, "/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal(Errors.InvalidRequest, response.Error);
@@ -42,26 +47,26 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ExtractLogoutRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ExtractEndSessionRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractLogoutRequestContext>(builder =>
+            options.AddEventHandler<ExtractEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal(error ?? Errors.InvalidRequest, response.Error);
@@ -70,14 +75,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ExtractLogoutRequest_AllowsHandlingResponse()
+    public async Task ExtractEndSessionRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractLogoutRequestContext>(builder =>
+            options.AddEventHandler<ExtractEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -87,43 +92,174 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.GetAsync("/connect/logout");
+        var response = await client.GetAsync("/connect/endsession");
 
         // Assert
         Assert.Equal("Bob le Bricoleur", (string?) response["name"]);
     }
 
     [Fact]
-    public async Task ExtractLogoutRequest_AllowsSkippingHandler()
+    public async Task ExtractEndSessionRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ExtractLogoutRequestContext>(builder =>
+            options.AddEventHandler<ExtractEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.GetAsync("/connect/logout");
+        var response = await client.GetAsync("/connect/endsession");
 
         // Assert
         Assert.Equal("Bob le Magnifique", (string?) response["name"]);
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_UnsupportedRequestUriIsRejected()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options => options.EnableDegradedMode());
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.GetAsync("/connect/endsession", new OpenIddictRequest
+        {
+            RequestUri = "http://www.fabrikam.com/request/GkurKxf5T0Y-mnPFCHqWOMiZi4VS138cQO_V7PZHAdM"
+        });
+
+        // Assert
+        Assert.Equal(Errors.RequestUriNotSupported, response.Error);
+        Assert.Equal(SR.FormatID2028(Parameters.RequestUri), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2028), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateEndSession_ValidRequestUriDoesNotCauseAnError()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    context.SignOut();
+
+                    return ValueTask.CompletedTask;
+                }));
+
+            options.AddEventHandler<ValidateTokenContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("6esc_11ACC5bwc014ltc14eY22c", context.Token);
+                    Assert.Equal([TokenTypeIdentifiers.Private.RequestToken], context.ValidTokenTypes);
+
+                    context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
+                        .SetTokenType(TokenTypeIdentifiers.Private.RequestToken)
+                        .SetClaim(Claims.Private.RequestTokenType, RequestTokenTypes.Private.CachedEndSessionRequest)
+                        .SetClaim(Claims.Private.RequestParameters, $$"""
+                        {
+                          "post_logout_redirect_uri": "http://www.fabrikam.com/path",
+                          "state": "af0ifjsldkj"
+                        }
+                        """);
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
+            });
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.GetAsync("/connect/endsession", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            RequestUri = RequestUris.Prefixes.Generic + "6esc_11ACC5bwc014ltc14eY22c"
+        });
+
+        // Assert
+        Assert.Null(response.Error);
+        Assert.Null(response.ErrorDescription);
+        Assert.Null(response.ErrorUri);
+        Assert.Equal("af0ifjsldkj", response.State);
+    }
+
+    [Fact]
+    public async Task ValidateEndSession_MissingClientIdDoesNotCauseAnError()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    context.SignOut();
+
+                    return ValueTask.CompletedTask;
+                }));
+
+            options.AddEventHandler<ValidateTokenContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("6esc_11ACC5bwc014ltc14eY22c", context.Token);
+                    Assert.Equal([TokenTypeIdentifiers.Private.RequestToken], context.ValidTokenTypes);
+
+                    context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
+                        .SetTokenType(TokenTypeIdentifiers.Private.RequestToken)
+                        .SetClaim(Claims.Private.RequestTokenType, RequestTokenTypes.Private.CachedEndSessionRequest)
+                        .SetClaim(Claims.Private.RequestParameters, $$"""
+                        {
+                          "post_logout_redirect_uri": "http://www.fabrikam.com/path",
+                          "state": "af0ifjsldkj"
+                        }
+                        """);
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
+            });
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.GetAsync("/connect/endsession", new OpenIddictRequest
+        {
+            ClientId = null,
+            RequestUri = RequestUris.Prefixes.Generic + "6esc_11ACC5bwc014ltc14eY22c"
+        });
+
+        // Assert
+        Assert.Null(response.Error);
+        Assert.Null(response.ErrorDescription);
+        Assert.Null(response.ErrorUri);
+        Assert.Equal("af0ifjsldkj", response.State);
     }
 
     [Theory]
@@ -131,16 +267,16 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData("/tmp/file.xml", SR.ID2030)]
     [InlineData("C:\\tmp\\file.xml", SR.ID2030)]
     [InlineData("http://www.fabrikam.com/path#param=value", SR.ID2031)]
-    public async Task ValidateLogoutRequest_InvalidRedirectUriCausesAnError(string address, string message)
+    public async Task ValidateEndSessionRequest_InvalidPostLogoutRedirectUriCausesAnError(string uri, string message)
     {
         // Arrange
         await using var server = await CreateServerAsync();
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
         {
-            PostLogoutRedirectUri = address
+            PostLogoutRedirectUri = uri
         });
 
         // Assert
@@ -150,7 +286,40 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateLogoutRequest_RequestIsRejectedWhenNoMatchingApplicationIsFound()
+    public async Task ValidateEndSessionRequest_RequestIsRejectedWhenClientCannotBeFound()
+    {
+        // Arrange
+        var manager = CreateApplicationManager(mock =>
+        {
+            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(value: null);
+        });
+
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.Services.AddSingleton(manager);
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            PostLogoutRedirectUri = "http://www.fabrikam.com/path"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.FormatID2052(Parameters.ClientId), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2052), response.ErrorUri);
+
+        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+        Mock.Get(manager).Verify(manager => manager.FindByPostLogoutRedirectUriAsync("http://www.fabrikam.com/path", It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_RequestIsRejectedWhenNoMatchingApplicationIsFound()
     {
         // Arrange
         var manager = CreateApplicationManager(mock =>
@@ -167,7 +336,7 @@ public abstract partial class OpenIddictServerIntegrationTests
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
         {
             PostLogoutRedirectUri = "http://www.fabrikam.com/path"
         });
@@ -181,24 +350,17 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateLogoutRequest_RequestIsRejectedWhenNoMatchingApplicationIsGrantedEndpointPermission()
+    public async Task ValidateEndSessionRequest_RequestIsRejectedWhenPostLogoutRedirectUriForExplicitClientIsInvalid()
     {
         // Arrange
-        var applications = new[]
-        {
-            new OpenIddictApplication(),
-            new OpenIddictApplication()
-        };
+        var application = new OpenIddictApplication();
 
         var manager = CreateApplicationManager(mock =>
         {
-            mock.Setup(manager => manager.FindByPostLogoutRedirectUriAsync("http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
-                .Returns(applications.ToAsyncEnumerable());
+            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(application);
 
-            mock.Setup(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-
-            mock.Setup(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()))
+            mock.Setup(manager => manager.ValidatePostLogoutRedirectUriAsync(application, "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
         });
 
@@ -212,7 +374,89 @@ public abstract partial class OpenIddictServerIntegrationTests
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            PostLogoutRedirectUri = "http://www.fabrikam.com/path"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.FormatID2052(Parameters.PostLogoutRedirectUri), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2052), response.ErrorUri);
+
+        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+        Mock.Get(manager).Verify(manager => manager.ValidatePostLogoutRedirectUriAsync(application,
+            "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_RequestIsRejectedWhenPostLogoutRedirectUriForImplicitClientIsInvalid()
+    {
+        // Arrange
+        var manager = CreateApplicationManager(mock =>
+        {
+            mock.Setup(manager => manager.FindByPostLogoutRedirectUriAsync("http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
+                .Returns(AsyncEnumerable.Empty<OpenIddictApplication>());
+        });
+
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.Services.AddSingleton(manager);
+
+            options.Configure(options => options.IgnoreEndpointPermissions = false);
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
+        {
+            PostLogoutRedirectUri = "http://www.fabrikam.com/path"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.FormatID2052(Parameters.PostLogoutRedirectUri), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2052), response.ErrorUri);
+
+        Mock.Get(manager).Verify(manager => manager.FindByPostLogoutRedirectUriAsync(
+            "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_RequestIsRejectedWhenNoMatchingApplicationIsGrantedEndpointPermission()
+    {
+        // Arrange
+        var applications = new[]
+        {
+            new OpenIddictApplication(),
+            new OpenIddictApplication()
+        };
+
+        var manager = CreateApplicationManager(mock =>
+        {
+            mock.Setup(manager => manager.FindByPostLogoutRedirectUriAsync("http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
+                .Returns(applications.ToAsyncEnumerable());
+
+            mock.Setup(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+
+            mock.Setup(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+        });
+
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.Services.AddSingleton(manager);
+
+            options.Configure(options => options.IgnoreEndpointPermissions = false);
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
         {
             PostLogoutRedirectUri = "http://www.fabrikam.com/path"
         });
@@ -223,12 +467,12 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.Equal(SR.FormatID8000(SR.ID2052), response.ErrorUri);
 
         Mock.Get(manager).Verify(manager => manager.FindByPostLogoutRedirectUriAsync("http://www.fabrikam.com/path", It.IsAny<CancellationToken>()), Times.Once());
-        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()), Times.Once());
-        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()), Times.Once());
+        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()), Times.Once());
+        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Fact]
-    public async Task ValidateLogoutRequest_RequestIsValidatedWhenMatchingApplicationIsFound()
+    public async Task ValidateEndSessionRequest_RequestIsValidatedWhenMatchingApplicationIsFound()
     {
         // Arrange
         var applications = new[]
@@ -243,29 +487,32 @@ public abstract partial class OpenIddictServerIntegrationTests
             mock.Setup(manager => manager.FindByPostLogoutRedirectUriAsync("http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
                 .Returns(applications.ToAsyncEnumerable());
 
-            mock.Setup(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()))
+            mock.Setup(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
 
-            mock.Setup(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()))
+            mock.Setup(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(true);
 
-            mock.Setup(manager => manager.HasPermissionAsync(applications[2], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()))
+            mock.Setup(manager => manager.HasPermissionAsync(applications[2], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(false);
+
+            mock.Setup(manager => manager.ValidatePostLogoutRedirectUriAsync(applications[1], "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
         });
 
         await using var server = await CreateServerAsync(options =>
         {
             options.Services.AddSingleton(manager);
 
-            options.SetLogoutEndpointUris("/signout");
+            options.SetEndSessionEndpointUris("/signout");
             options.Configure(options => options.IgnoreEndpointPermissions = false);
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -282,9 +529,321 @@ public abstract partial class OpenIddictServerIntegrationTests
         Assert.Equal("af0ifjsldkj", response.State);
 
         Mock.Get(manager).Verify(manager => manager.FindByPostLogoutRedirectUriAsync("http://www.fabrikam.com/path", It.IsAny<CancellationToken>()), Times.Once());
-        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()), Times.Once());
-        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()), Times.Once());
-        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[2], Permissions.Endpoints.Logout, It.IsAny<CancellationToken>()), Times.Never());
+        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()), Times.Once());
+        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()), Times.Once());
+        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(applications[2], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_RequestIsRejectedWhenEndpointPermissionIsNotGranted()
+    {
+        // Arrange
+        var application = new OpenIddictApplication();
+
+        var manager = CreateApplicationManager(mock =>
+        {
+            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(application);
+
+            mock.Setup(manager => manager.GetPostLogoutRedirectUrisAsync(application, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(["http://www.fabrikam.com/path"]);
+
+            mock.Setup(manager => manager.HasPermissionAsync(application,
+                Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+        });
+
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.Services.AddSingleton(manager);
+
+            options.Configure(options => options.IgnoreEndpointPermissions = false);
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam"
+        });
+
+        // Assert
+        Assert.Equal(Errors.UnauthorizedClient, response.Error);
+        Assert.Equal(SR.GetResourceString(SR.ID2140), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2140), response.ErrorUri);
+
+        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(application,
+            Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_InvalidIdentityTokenHintDoesNotCauseAnError()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Null(context.IdentityTokenHintPrincipal);
+
+                    context.SignOut();
+
+                    return ValueTask.CompletedTask;
+                }));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            IdTokenHint = "id_token",
+            PostLogoutRedirectUri = "http://www.fabrikam.com/path",
+            State = "af0ifjsldkj"
+        });
+
+        // Assert
+        Assert.Equal("af0ifjsldkj", response.State);
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_InvalidIdentityTokenHintCausesAnErrorWhenRejectionIsEnabled()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+
+            options.AddEventHandler<ProcessAuthenticationContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    context.RejectIdentityToken = true;
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(EvaluateValidatedTokens.Descriptor.Order + 500);
+            });
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            IdTokenHint = "id_token"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidToken, response.Error);
+        Assert.Equal(SR.GetResourceString(SR.ID2009), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2009), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_IdentityTokenHintCausesAnErrorWhenExplicitCallerIsNotAuthorized()
+    {
+        // Arrange
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.EnableDegradedMode();
+            options.Configure(options => options.IgnoreEndpointPermissions = false);
+
+            options.AddEventHandler<ValidateTokenContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("id_token", context.Token);
+                    Assert.Equal([TokenTypeIdentifiers.IdentityToken], context.ValidTokenTypes);
+
+                    context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
+                        .SetTokenType(TokenTypeIdentifiers.IdentityToken)
+                        .SetPresenters("Contoso")
+                        .SetClaim(Claims.Subject, "Bob le Bricoleur");
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
+            });
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            IdTokenHint = "id_token"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.GetResourceString(SR.ID2141), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2141), response.ErrorUri);
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_IdentityTokenHintCausesAnErrorWhenInferredCallerIsNotAuthorized()
+    {
+        // Arrange
+        var applications = new[]
+        {
+            new OpenIddictApplication(),
+            new OpenIddictApplication()
+        };
+
+        var manager = CreateApplicationManager(mock =>
+        {
+            mock.Setup(manager => manager.FindByPostLogoutRedirectUriAsync("http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
+                .Returns(new[] { applications[0] }.ToAsyncEnumerable());
+
+            mock.Setup(manager => manager.HasPermissionAsync(applications[0], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
+            mock.Setup(manager => manager.ValidatePostLogoutRedirectUriAsync(applications[0], "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
+            mock.Setup(manager => manager.GetClientIdAsync(applications[0], It.IsAny<CancellationToken>()))
+                .ReturnsAsync("Fabrikam");
+
+            mock.Setup(manager => manager.FindByClientIdAsync("Contoso", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(applications[1]);
+
+            mock.Setup(manager => manager.HasPermissionAsync(applications[1], Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
+            mock.Setup(manager => manager.ValidatePostLogoutRedirectUriAsync(applications[1], "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false);
+        });
+
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.Services.AddSingleton(manager);
+
+            options.Configure(options => options.IgnoreEndpointPermissions = false);
+
+            options.AddEventHandler<ValidateTokenContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("id_token", context.Token);
+                    Assert.Equal([TokenTypeIdentifiers.IdentityToken], context.ValidTokenTypes);
+
+                    context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
+                        .SetTokenType(TokenTypeIdentifiers.IdentityToken)
+                        .SetPresenters("Contoso")
+                        .SetClaim(Claims.Subject, "Bob le Bricoleur");
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
+            });
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
+        {
+            IdTokenHint = "id_token",
+            PostLogoutRedirectUri = "http://www.fabrikam.com/path"
+        });
+
+        // Assert
+        Assert.Equal(Errors.InvalidRequest, response.Error);
+        Assert.Equal(SR.GetResourceString(SR.ID2141), response.ErrorDescription);
+        Assert.Equal(SR.FormatID8000(SR.ID2141), response.ErrorUri);
+
+        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Contoso", It.IsAny<CancellationToken>()), Times.Once());
+        Mock.Get(manager).Verify(manager => manager.ValidatePostLogoutRedirectUriAsync(applications[0], "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()), Times.Once());
+        Mock.Get(manager).Verify(manager => manager.ValidatePostLogoutRedirectUriAsync(applications[1], "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task ValidateEndSessionRequest_RequestIsValidatedWhenIdentityTokenHintIsExpired()
+    {
+        // Arrange
+        var application = new OpenIddictApplication();
+
+        var manager = CreateApplicationManager(mock =>
+        {
+            mock.Setup(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(application);
+
+            mock.Setup(manager => manager.ValidatePostLogoutRedirectUriAsync(application, "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+
+            mock.Setup(manager => manager.HasPermissionAsync(application,
+                Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+        });
+
+        await using var server = await CreateServerAsync(options =>
+        {
+            options.Services.AddSingleton(manager);
+
+            options.SetEndSessionEndpointUris("/signout");
+
+            options.Configure(options => options.IgnoreEndpointPermissions = false);
+
+            options.AddEventHandler<ValidateTokenContext>(builder =>
+            {
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("id_token", context.Token);
+                    Assert.Equal([TokenTypeIdentifiers.IdentityToken], context.ValidTokenTypes);
+
+                    context.Principal = new ClaimsPrincipal(new ClaimsIdentity("Bearer"))
+                        .SetTokenType(TokenTypeIdentifiers.IdentityToken)
+                        .SetPresenters("Fabrikam")
+                        .SetExpirationDate(new DateTimeOffset(2017, 1, 1, 0, 0, 0, TimeSpan.Zero))
+                        .SetClaim(Claims.Subject, "Bob le Bricoleur");
+
+                    return ValueTask.CompletedTask;
+                });
+
+                builder.SetOrder(ValidateIdentityModelToken.Descriptor.Order - 500);
+            });
+
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
+                builder.UseInlineHandler(context =>
+                {
+                    Assert.Equal("Bob le Bricoleur", context.IdentityTokenHintPrincipal
+                        ?.FindFirst(Claims.Subject)?.Value);
+
+                    context.SignOut();
+
+                    return ValueTask.CompletedTask;
+                }));
+        });
+
+        await using var client = await server.CreateClientAsync();
+
+        // Act
+        var response = await client.PostAsync("/signout", new OpenIddictRequest
+        {
+            ClientId = "Fabrikam",
+            IdTokenHint = "id_token",
+            PostLogoutRedirectUri = "http://www.fabrikam.com/path",
+            State = "af0ifjsldkj"
+        });
+
+        // Assert
+        Assert.Equal("af0ifjsldkj", response.State);
+
+        Mock.Get(manager).Verify(manager => manager.FindByClientIdAsync("Fabrikam", It.IsAny<CancellationToken>()), Times.AtLeastOnce());
+        Mock.Get(manager).Verify(manager => manager.ValidatePostLogoutRedirectUriAsync(application, "http://www.fabrikam.com/path", It.IsAny<CancellationToken>()), Times.Once());
+        Mock.Get(manager).Verify(manager => manager.HasPermissionAsync(application, Permissions.Endpoints.EndSession, It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Theory]
@@ -295,26 +854,26 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task ValidateLogoutRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task ValidateEndSessionRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateLogoutRequestContext>(builder =>
+            options.AddEventHandler<ValidateEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal(error ?? Errors.InvalidRequest, response.Error);
@@ -323,14 +882,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ValidateLogoutRequest_AllowsHandlingResponse()
+    public async Task ValidateEndSessionRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateLogoutRequestContext>(builder =>
+            options.AddEventHandler<ValidateEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -340,40 +899,40 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal("Bob le Bricoleur", (string?) response["name"]);
     }
 
     [Fact]
-    public async Task ValidateLogoutRequest_AllowsSkippingHandler()
+    public async Task ValidateEndSessionRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<ValidateLogoutRequestContext>(builder =>
+            options.AddEventHandler<ValidateEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal("Bob le Magnifique", (string?) response["name"]);
@@ -387,26 +946,26 @@ public abstract partial class OpenIddictServerIntegrationTests
     [InlineData(null, "custom_description", "custom_uri")]
     [InlineData(null, null, "custom_uri")]
     [InlineData(null, null, null)]
-    public async Task HandleLogoutRequest_AllowsRejectingRequest(string error, string description, string uri)
+    public async Task HandleEndSessionRequest_AllowsRejectingRequest(string? error, string? description, string? uri)
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Reject(error, description, uri);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal(error ?? Errors.InvalidRequest, response.Error);
@@ -415,14 +974,14 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task HandleLogoutRequest_AllowsHandlingResponse()
+    public async Task HandleEndSessionRequest_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -432,99 +991,95 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal("Bob le Bricoleur", (string?) response["name"]);
     }
 
     [Fact]
-    public async Task HandleLogoutRequest_AllowsSkippingHandler()
+    public async Task HandleEndSessionRequest_AllowsSkippingHandler()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SkipRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal("Bob le Magnifique", (string?) response["name"]);
     }
 
     [Fact]
-    public async Task HandleLogoutResponse_ResponseContainsCustomParameters()
+    public async Task HandleEndSessionResponse_ResponseContainsCustomParameters()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
                     context.Parameters["custom_parameter"] = "custom_value";
-                    context.Parameters["parameter_with_multiple_values"] = new[]
-                    {
-                        "custom_value_1",
-                        "custom_value_2"
-                    };
+                    context.Parameters["parameter_with_multiple_values"] = new(["custom_value_1", "custom_value_2"]);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
         {
             PostLogoutRedirectUri = "http://www.fabrikam.com/path"
         });
 
         // Assert
         Assert.Equal("custom_value", (string?) response["custom_parameter"]);
-        Assert.Equal(new[] { "custom_value_1", "custom_value_2" }, (string[]?) response["parameter_with_multiple_values"]);
+        Assert.Equal<IEnumerable<string?>?>(["custom_value_1", "custom_value_2"], (ImmutableArray<string?>?) response["parameter_with_multiple_values"]);
     }
 
     [Fact]
-    public async Task ApplyLogoutResponse_AllowsHandlingResponse()
+    public async Task ApplyEndSessionResponse_AllowsHandlingResponse()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyLogoutResponseContext>(builder =>
+            options.AddEventHandler<ApplyEndSessionResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Transaction.SetProperty("custom_response", new
@@ -534,91 +1089,87 @@ public abstract partial class OpenIddictServerIntegrationTests
 
                     context.HandleRequest();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Equal("Bob le Bricoleur", (string?) response["name"]);
     }
 
     [Fact]
-    public async Task ApplyLogoutResponse_ResponseContainsCustomParameters()
+    public async Task ApplyEndSessionResponse_ResponseContainsCustomParameters()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyLogoutResponseContext>(builder =>
+            options.AddEventHandler<ApplyEndSessionResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Response["custom_parameter"] = "custom_value";
-                    context.Response["parameter_with_multiple_values"] = new[]
-                    {
-                        "custom_value_1",
-                        "custom_value_2"
-                    };
+                    context.Response["parameter_with_multiple_values"] = new(["custom_value_1", "custom_value_2"]);
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
         {
             PostLogoutRedirectUri = "http://www.fabrikam.com/path"
         });
 
         // Assert
         Assert.Equal("custom_value", (string?) response["custom_parameter"]);
-        Assert.Equal(new[] { "custom_value_1", "custom_value_2" }, (string[]?) response["parameter_with_multiple_values"]);
+        Assert.Equal<IEnumerable<string?>?>(["custom_value_1", "custom_value_2"], (ImmutableArray<string?>?) response["parameter_with_multiple_values"]);
     }
 
     [Fact]
-    public async Task ApplyLogoutResponse_UsesPostLogoutRedirectUriWhenProvided()
+    public async Task ApplyEndSessionResponse_UsesPostLogoutRedirectUriWhenProvided()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyLogoutResponseContext>(builder =>
+            options.AddEventHandler<ApplyEndSessionResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Response["target_uri"] = context.PostLogoutRedirectUri;
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest
         {
             PostLogoutRedirectUri = "http://www.fabrikam.com/path"
         });
@@ -628,54 +1179,54 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyLogoutResponse_ReturnsEmptyResponseWhenNoPostLogoutRedirectUriIsProvided()
+    public async Task ApplyEndSessionResponse_ReturnsEmptyResponseWhenNoPostLogoutRedirectUriIsProvided()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyLogoutResponseContext>(builder =>
+            options.AddEventHandler<ApplyEndSessionResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Response["target_uri"] = context.PostLogoutRedirectUri;
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
         await using var client = await server.CreateClientAsync();
 
         // Act
-        var response = await client.PostAsync("/connect/logout", new OpenIddictRequest());
+        var response = await client.PostAsync("/connect/endsession", new OpenIddictRequest());
 
         // Assert
         Assert.Empty(response.GetParameters());
     }
 
     [Fact]
-    public async Task ApplyLogoutResponse_DoesNotSetStateWhenUserIsNotRedirected()
+    public async Task ApplyEndSessionResponse_DoesNotSetStateWhenUserIsNotRedirected()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
-            options.SetLogoutEndpointUris("/signout");
+            options.SetEndSessionEndpointUris("/signout");
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -692,20 +1243,20 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyLogoutResponse_FlowsStateWhenRedirectUriIsUsed()
+    public async Task ApplyEndSessionResponse_FlowsStateWhenRedirectUriIsUsed()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
-            options.SetLogoutEndpointUris("/signout");
+            options.SetEndSessionEndpointUris("/signout");
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 
@@ -723,28 +1274,28 @@ public abstract partial class OpenIddictServerIntegrationTests
     }
 
     [Fact]
-    public async Task ApplyLogoutResponse_DoesNotOverrideStateSetByApplicationCode()
+    public async Task ApplyEndSessionResponse_DoesNotOverrideStateSetByApplicationCode()
     {
         // Arrange
         await using var server = await CreateServerAsync(options =>
         {
             options.EnableDegradedMode();
-            options.SetLogoutEndpointUris("/signout");
+            options.SetEndSessionEndpointUris("/signout");
 
-            options.AddEventHandler<HandleLogoutRequestContext>(builder =>
+            options.AddEventHandler<HandleEndSessionRequestContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.SignOut();
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
 
-            options.AddEventHandler<ApplyLogoutResponseContext>(builder =>
+            options.AddEventHandler<ApplyEndSessionResponseContext>(builder =>
                 builder.UseInlineHandler(context =>
                 {
                     context.Response.State = "custom_state";
 
-                    return default;
+                    return ValueTask.CompletedTask;
                 }));
         });
 

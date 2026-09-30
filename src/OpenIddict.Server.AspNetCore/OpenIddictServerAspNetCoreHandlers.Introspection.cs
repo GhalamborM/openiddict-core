@@ -12,11 +12,14 @@ public static partial class OpenIddictServerAspNetCoreHandlers
 {
     public static class Introspection
     {
-        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
+        public static ImmutableArray<OpenIddictServerHandlerDescriptor> DefaultHandlers { get; } =
+        [
             /*
              * Introspection request extraction:
              */
             ExtractGetOrPostRequest<ExtractIntrospectionRequestContext>.Descriptor,
+            ValidateClientAuthenticationMethod<ExtractIntrospectionRequestContext>.Descriptor,
+            ExtractClientCertificate<ExtractIntrospectionRequestContext>.Descriptor,
             ExtractBasicAuthenticationCredentials<ExtractIntrospectionRequestContext>.Descriptor,
 
             /*
@@ -24,6 +27,7 @@ public static partial class OpenIddictServerAspNetCoreHandlers
              */
             AttachHttpResponseCode<ApplyIntrospectionResponseContext>.Descriptor,
             AttachWwwAuthenticateHeader<ApplyIntrospectionResponseContext>.Descriptor,
-            ProcessJsonResponse<ApplyIntrospectionResponseContext>.Descriptor);
+            ProcessJsonResponse<ApplyIntrospectionResponseContext>.Descriptor
+        ];
     }
 }

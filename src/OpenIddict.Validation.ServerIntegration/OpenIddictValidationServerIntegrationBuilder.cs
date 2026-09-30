@@ -5,6 +5,7 @@
  */
 
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using OpenIddict.Validation.ServerIntegration;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -12,10 +13,10 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>
 /// Exposes the necessary methods required to configure the OpenIddict validation services.
 /// </summary>
-public class OpenIddictValidationServerIntegrationBuilder
+public sealed class OpenIddictValidationServerIntegrationBuilder
 {
     /// <summary>
-    /// Initializes a new instance of <see cref="OpenIddictValidationBuilder"/>.
+    /// Initializes a new instance of <see cref="OpenIddictValidationServerIntegrationBuilder"/>.
     /// </summary>
     /// <param name="services">The services collection.</param>
     public OpenIddictValidationServerIntegrationBuilder(IServiceCollection services)
@@ -28,17 +29,26 @@ public class OpenIddictValidationServerIntegrationBuilder
     public IServiceCollection Services { get; }
 
     /// <summary>
+    /// Enables validation of options during application startup.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictValidationServerIntegrationBuilder"/> instance.</returns>
+    public OpenIddictValidationServerIntegrationBuilder ValidateOnStart()
+    {
+        Services.AddOptionsWithValidateOnStart<OpenIddictValidationServerIntegrationOptions>();
+
+        return this;
+    }
+
+    /// <summary>
     /// Amends the default OpenIddict validation/server integration configuration.
     /// </summary>
     /// <param name="configuration">The delegate used to configure the OpenIddict options.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictValidationServerIntegrationBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictValidationServerIntegrationBuilder"/> instance.</returns>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
     public OpenIddictValidationServerIntegrationBuilder Configure(Action<OpenIddictValidationServerIntegrationOptions> configuration)
     {
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(configuration);
 
         Services.Configure(configuration);
 
@@ -47,7 +57,7 @@ public class OpenIddictValidationServerIntegrationBuilder
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public override bool Equals(object? obj) => base.Equals(obj);
+    public override bool Equals([NotNullWhen(true)] object? obj) => base.Equals(obj);
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]

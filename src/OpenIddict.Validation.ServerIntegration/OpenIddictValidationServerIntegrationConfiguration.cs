@@ -4,8 +4,10 @@
  * the license and the contributors participating to this project.
  */
 
+using System.ComponentModel;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.Extensions.Primitives;
 using OpenIddict.Server;
 
 namespace OpenIddict.Validation.ServerIntegration;
@@ -13,82 +15,89 @@ namespace OpenIddict.Validation.ServerIntegration;
 /// <summary>
 /// Contains the methods required to ensure that the OpenIddict validation/server integration configuration is valid.
 /// </summary>
-public class OpenIddictValidationServerIntegrationConfiguration : IConfigureOptions<OpenIddictValidationOptions>,
-                                                                  IPostConfigureOptions<OpenIddictValidationOptions>
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictValidationServerIntegrationConfiguration : IConfigureOptions<OpenIddictValidationOptions>,
+                                                                         IValidateOptions<OpenIddictValidationOptions>,
+                                                                         IOptionsChangeTokenSource<OpenIddictValidationOptions>
 {
-    private readonly IOptionsMonitor<OpenIddictServerOptions> _options;
+    private readonly IServiceProvider _provider;
 
     /// <summary>
     /// Creates a new instance of the <see cref="OpenIddictValidationServerIntegrationConfiguration"/> class.
     /// </summary>
-    /// <param name="options">The OpenIddict server options.</param>
-    public OpenIddictValidationServerIntegrationConfiguration(IOptionsMonitor<OpenIddictServerOptions> options)
-        => _options = options;
+    /// <param name="provider">The service provider.</param>
+    public OpenIddictValidationServerIntegrationConfiguration(IServiceProvider provider)
+        => _provider = provider ?? throw new ArgumentNullException(nameof(provider));
 
-    /// <summary>
-    /// Populates the default OpenIddict validation/server integration options
-    /// and ensures that the configuration is in a consistent and valid state.
-    /// </summary>
-    /// <param name="options">The options instance to initialize.</param>
+    /// <inheritdoc/>
     public void Configure(OpenIddictValidationOptions options)
     {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
+        ArgumentNullException.ThrowIfNull(options);
+
+        var settings = _provider.GetRequiredService<IOptionsMonitor<OpenIddictServerOptions>>().CurrentValue;
 
         // Note: the issuer may be null. In this case, it will be usually provided by
         // a validation handler registered by the host (e.g ASP.NET Core or OWIN/Katana).
-        options.Configuration = new OpenIdConnectConfiguration
+        options.Issuer = settings.Issuer;
+        options.Configuration = new OpenIddictConfiguration
         {
-            Issuer = _options.CurrentValue.Issuer?.AbsoluteUri
+            Issuer = options.Issuer
         };
 
         // Import the signing keys from the server configuration.
-        foreach (var credentials in _options.CurrentValue.SigningCredentials)
+        foreach (var credentials in settings.SigningCredentials)
         {
             options.Configuration.SigningKeys.Add(credentials.Key);
         }
 
         // Import the encryption keys from the server configuration.
-        options.EncryptionCredentials.AddRange(_options.CurrentValue.EncryptionCredentials);
+        options.EncryptionCredentials.AddRange(settings.EncryptionCredentials);
 
         // Note: token entry validation must be enabled to be able to validate reference access tokens.
-        options.EnableTokenEntryValidation = _options.CurrentValue.UseReferenceAccessTokens;
+        options.EnableTokenEntryValidation = settings.UseReferenceAccessTokens;
     }
 
-    /// <summary>
-    /// Populates the default OpenIddict validation/server integration options
-    /// and ensures that the configuration is in a consistent and valid state.
-    /// </summary>
-    /// <param name="name">The name of the options instance to configure, if applicable.</param>
-    /// <param name="options">The options instance to initialize.</param>
-    public void PostConfigure(string name, OpenIddictValidationOptions options)
+    /// <inheritdoc/>
+    public ValidateOptionsResult Validate(string? name, OpenIddictValidationOptions options)
     {
-        if (options is null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
+        ArgumentNullException.ThrowIfNull(options);
 
-        if (options.ValidationType != OpenIddictValidationType.Direct)
+        var builder = new ValidateOptionsResultBuilder();
+
+        var settings = _provider.GetRequiredService<IOptionsMonitor<OpenIddictServerOptions>>().CurrentValue;
+
+        if (options.ValidationType is not OpenIddictValidationType.Direct)
         {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0170));
+            builder.AddError(SR.GetResourceString(SR.ID0170));
         }
 
         // Note: authorization validation requires that authorizations have an entry
         // in the database (containing at least the authorization metadata), which is
         // not created if the authorization storage is disabled in the server options.
-        if (options.EnableAuthorizationEntryValidation && _options.CurrentValue.DisableAuthorizationStorage)
+        if (options.EnableAuthorizationEntryValidation && settings.DisableAuthorizationStorage)
         {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0171));
+            builder.AddError(SR.GetResourceString(SR.ID0171));
         }
 
         // Note: token validation requires that tokens have an entry in the database
         // (containing at least the token metadata), which is not created if the
         // token storage is disabled in the OpenIddict server options.
-        if (options.EnableTokenEntryValidation && _options.CurrentValue.DisableTokenStorage)
+        if (options.EnableTokenEntryValidation && settings.DisableTokenStorage)
         {
-            throw new InvalidOperationException(SR.GetResourceString(SR.ID0172));
+            builder.AddError(SR.GetResourceString(SR.ID0172));
         }
+
+        return builder.Build();
     }
+
+    /// <inheritdoc/>
+    IChangeToken IOptionsChangeTokenSource<OpenIddictValidationOptions>.GetChangeToken() => new CompositeChangeToken(
+    [
+        // Force the options to be re-evaluated when the related instances from which they are populated are changed.
+        .. from source in _provider.GetServices<IOptionsChangeTokenSource<OpenIddictServerOptions>>()
+           select source.GetChangeToken()
+    ]);
+
+    /// <inheritdoc/>
+    string? IOptionsChangeTokenSource<OpenIddictValidationOptions>.Name => Options.DefaultName;
 }

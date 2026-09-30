@@ -4,37 +4,53 @@
  * the license and the contributors participating to this project.
  */
 
-using Microsoft.Extensions.Logging;
+using System.ComponentModel;
+using System.Security.Cryptography.X509Certificates;
 
 namespace OpenIddict.Server;
 
 /// <summary>
-/// Represents the context associated with an OpenID Connect server request.
+/// Represents the context associated with an OpenID Connect server operation.
 /// </summary>
-public class OpenIddictServerTransaction
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictServerTransaction
 {
     /// <summary>
-    /// Gets or sets the type of the endpoint processing the current request.
+    /// Gets the cancellation token used to determine if the operation was aborted.
+    /// </summary>
+    public required CancellationToken CancellationToken { get; init; }
+
+    /// <summary>
+    /// Gets or sets the X.509 client certificate used by the remote peer, if available.
+    /// </summary>
+    public X509Certificate2? RemoteCertificate { get; set; }
+
+    /// <summary>
+    /// Gets or sets the type of the endpoint processing the current transaction.
     /// </summary>
     public OpenIddictServerEndpointType EndpointType { get; set; }
 
     /// <summary>
-    /// Gets or sets the issuer address associated with the current transaction, if available.
+    /// Gets or sets the request <see cref="Uri"/> of the current transaction, if available.
     /// </summary>
-    public Uri? Issuer { get; set; }
+    public Uri? RequestUri { get; set; }
 
     /// <summary>
-    /// Gets or sets the logger associated with the current request.
+    /// Gets or sets the base <see cref="Uri"/> of the host, if available.
     /// </summary>
-    public ILogger Logger { get; set; } = default!;
+    public Uri? BaseUri { get; set; }
 
     /// <summary>
-    /// Gets or sets the options associated with the current request.
+    /// Gets the options associated with the current transaction.
     /// </summary>
-    public OpenIddictServerOptions Options { get; set; } = default!;
+    public required OpenIddictServerOptions Options
+    {
+        get;
+        init { ArgumentNullException.ThrowIfNull(value); field = value; }
+    }
 
     /// <summary>
-    /// Gets the additional properties associated with the current request.
+    /// Gets the additional properties associated with the current transaction.
     /// </summary>
     public Dictionary<string, object?> Properties { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -47,4 +63,13 @@ public class OpenIddictServerTransaction
     /// Gets or sets the current OpenID Connect response being returned.
     /// </summary>
     public OpenIddictResponse? Response { get; set; }
+
+    /// <summary>
+    /// Gets the service provider used to resolve services.
+    /// </summary>
+    public required IServiceProvider ServiceProvider
+    {
+        get;
+        init { ArgumentNullException.ThrowIfNull(value); field = value; }
+    }
 }

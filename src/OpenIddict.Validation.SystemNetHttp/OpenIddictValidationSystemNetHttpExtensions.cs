@@ -22,13 +22,10 @@ public static class OpenIddictValidationSystemNetHttpExtensions
     /// </summary>
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictValidationBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictValidationBuilder"/> instance.</returns>
     public static OpenIddictValidationSystemNetHttpBuilder UseSystemNetHttp(this OpenIddictValidationBuilder builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         builder.Services.AddHttpClient();
 
@@ -37,14 +34,17 @@ public static class OpenIddictValidationSystemNetHttpExtensions
         builder.Services.TryAdd(OpenIddictValidationSystemNetHttpHandlers.DefaultHandlers.Select(descriptor => descriptor.ServiceDescriptor));
 
         // Register the built-in filters used by the default OpenIddict System.Net.Http event handlers.
-        builder.Services.TryAddSingleton<RequireHttpMetadataAddress>();
+        builder.Services.TryAddSingleton<RequireHttpUri>();
 
         // Note: TryAddEnumerable() is used here to ensure the initializers are registered only once.
-        builder.Services.TryAddEnumerable(new[]
-        {
-            ServiceDescriptor.Singleton<IConfigureOptions<OpenIddictValidationOptions>, OpenIddictValidationSystemNetHttpConfiguration>(),
-            ServiceDescriptor.Singleton<IConfigureOptions<HttpClientFactoryOptions>, OpenIddictValidationSystemNetHttpConfiguration>()
-        });
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IConfigureOptions<HttpClientFactoryOptions>, OpenIddictValidationSystemNetHttpConfiguration>());
+
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IConfigureOptions<OpenIddictValidationOptions>, OpenIddictValidationSystemNetHttpConfiguration>());
+
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<HttpClientFactoryOptions>, OpenIddictValidationSystemNetHttpConfiguration>());
 
         return new OpenIddictValidationSystemNetHttpBuilder(builder.Services);
     }
@@ -55,19 +55,12 @@ public static class OpenIddictValidationSystemNetHttpExtensions
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <param name="configuration">The configuration delegate used to configure the validation services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictBuilder"/> instance.</returns>
     public static OpenIddictValidationBuilder UseSystemNetHttp(
         this OpenIddictValidationBuilder builder, Action<OpenIddictValidationSystemNetHttpBuilder> configuration)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(builder.UseSystemNetHttp());
 

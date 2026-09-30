@@ -5,6 +5,7 @@
  */
 
 using System.ComponentModel;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
@@ -13,10 +14,10 @@ namespace OpenIddict.Server;
 /// <summary>
 /// Provides various settings needed to configure the OpenIddict server handler.
 /// </summary>
-public class OpenIddictServerOptions
+public sealed class OpenIddictServerOptions
 {
     /// <summary>
-    /// Gets or sets the optional base address used to uniquely identify the authorization server.
+    /// Gets or sets the optional URI used to uniquely identify the authorization server.
     /// The URI must be absolute and may contain a path, but no query string or fragment part.
     /// </summary>
     public Uri? Issuer { get; set; }
@@ -37,7 +38,7 @@ public class OpenIddictServerOptions
     ///   <item><description>X.509 keys whose backing certificate is not yet valid are never preferred.</description></item>
     /// </list>
     /// </remarks>
-    public List<EncryptingCredentials> EncryptionCredentials { get; } = new();
+    public List<EncryptingCredentials> EncryptionCredentials { get; } = [];
 
     /// <summary>
     /// Gets the list of signing credentials used by the OpenIddict server services.
@@ -55,64 +56,69 @@ public class OpenIddictServerOptions
     ///   <item><description>X.509 keys whose backing certificate is not yet valid are never preferred.</description></item>
     /// </list>
     /// </remarks>
-    public List<SigningCredentials> SigningCredentials { get; } = new();
+    public List<SigningCredentials> SigningCredentials { get; } = [];
 
     /// <summary>
     /// Gets the absolute and relative URIs associated to the authorization endpoint.
     /// </summary>
-    public List<Uri> AuthorizationEndpointUris { get; } = new();
+    public List<Uri> AuthorizationEndpointUris { get; } = [];
 
     /// <summary>
     /// Gets the absolute and relative URIs associated to the configuration endpoint.
     /// </summary>
-    public List<Uri> ConfigurationEndpointUris { get; } = new()
-    {
-        new Uri("/.well-known/openid-configuration", UriKind.Relative),
-        new Uri("/.well-known/oauth-authorization-server", UriKind.Relative)
-    };
+    public List<Uri> ConfigurationEndpointUris { get; } =
+    [
+        new Uri(".well-known/openid-configuration", UriKind.Relative),
+        new Uri(".well-known/oauth-authorization-server", UriKind.Relative)
+    ];
 
     /// <summary>
-    /// Gets the absolute and relative URIs associated to the cryptography endpoint.
+    /// Gets the absolute and relative URIs associated to the device authorization endpoint.
     /// </summary>
-    public List<Uri> CryptographyEndpointUris { get; } = new()
-    {
-        new Uri("/.well-known/jwks", UriKind.Relative)
-    };
+    public List<Uri> DeviceAuthorizationEndpointUris { get; } = [];
 
     /// <summary>
-    /// Gets the absolute and relative URIs associated to the device endpoint.
+    /// Gets the absolute and relative URIs associated to the end session endpoint.
     /// </summary>
-    public List<Uri> DeviceEndpointUris { get; } = new();
+    public List<Uri> EndSessionEndpointUris { get; } = [];
 
     /// <summary>
     /// Gets the absolute and relative URIs associated to the introspection endpoint.
     /// </summary>
-    public List<Uri> IntrospectionEndpointUris { get; } = new();
+    public List<Uri> IntrospectionEndpointUris { get; } = [];
 
     /// <summary>
-    /// Gets the absolute and relative URIs associated to the logout endpoint.
+    /// Gets the absolute and relative URIs associated to the JSON Web Key Set endpoint.
     /// </summary>
-    public List<Uri> LogoutEndpointUris { get; } = new();
+    public List<Uri> JsonWebKeySetEndpointUris { get; } =
+    [
+        new Uri(".well-known/jwks", UriKind.Relative)
+    ];
+
+    /// <summary>
+    /// Gets the absolute and relative URIs associated to the pushed authorization endpoint.
+    /// </summary>
+    public List<Uri> PushedAuthorizationEndpointUris { get; } = [];
 
     /// <summary>
     /// Gets the absolute and relative URIs associated to the revocation endpoint.
     /// </summary>
-    public List<Uri> RevocationEndpointUris { get; } = new();
+    public List<Uri> RevocationEndpointUris { get; } = [];
 
     /// <summary>
     /// Gets the absolute and relative URIs associated to the token endpoint.
     /// </summary>
-    public List<Uri> TokenEndpointUris { get; } = new();
+    public List<Uri> TokenEndpointUris { get; } = [];
 
     /// <summary>
     /// Gets the absolute and relative URIs associated to the userinfo endpoint.
     /// </summary>
-    public List<Uri> UserinfoEndpointUris { get; } = new();
+    public List<Uri> UserInfoEndpointUris { get; } = [];
 
     /// <summary>
-    /// Gets the absolute and relative URIs associated to the verification endpoint.
+    /// Gets the absolute and relative URIs associated to the end-user verification endpoint.
     /// </summary>
-    public List<Uri> VerificationEndpointUris { get; } = new();
+    public List<Uri> EndUserVerificationEndpointUris { get; } = [];
 
     /// <summary>
     /// Gets or sets the JWT handler used to protect and unprotect tokens.
@@ -121,6 +127,66 @@ public class OpenIddictServerOptions
     {
         SetDefaultTimesOnTokenCreation = false
     };
+
+    /// <summary>
+    /// Gets or sets the URI listed as the mTLS device authorization
+    /// endpoint alias in the server configuration metadata.
+    /// </summary>
+    /// <remarks>
+    /// Note: this URI MUST be absolute and MUST point to a domain for
+    /// which TLS client authentication is enforced by the web server.
+    /// </remarks>
+    public Uri? MtlsDeviceAuthorizationEndpointAliasUri { get; set; }
+
+    /// <summary>
+    /// Gets or sets the URI listed as the mTLS introspection
+    /// endpoint alias in the server configuration metadata.
+    /// </summary>
+    /// <remarks>
+    /// Note: this URI MUST be absolute and MUST point to a domain for
+    /// which TLS client authentication is enforced by the web server.
+    /// </remarks>
+    public Uri? MtlsIntrospectionEndpointAliasUri { get; set; }
+
+    /// <summary>
+    /// Gets or sets the URI listed as the mTLS pushed authorization
+    /// endpoint alias in the server configuration metadata.
+    /// </summary>
+    /// <remarks>
+    /// Note: this URI MUST be absolute and MUST point to a domain for
+    /// which TLS client authentication is enforced by the web server.
+    /// </remarks>
+    public Uri? MtlsPushedAuthorizationEndpointAliasUri { get; set; }
+
+    /// <summary>
+    /// Gets or sets the URI listed as the mTLS revocation
+    /// endpoint alias in the server configuration metadata.
+    /// </summary>
+    /// <remarks>
+    /// Note: this URI MUST be absolute and MUST point to a domain for
+    /// which TLS client authentication is enforced by the web server.
+    /// </remarks>
+    public Uri? MtlsRevocationEndpointAliasUri { get; set; }
+
+    /// <summary>
+    /// Gets or sets the URI listed as the mTLS token
+    /// endpoint alias in the server configuration metadata.
+    /// </summary>
+    /// <remarks>
+    /// Note: this URI MUST be absolute and MUST point to a domain for
+    /// which TLS client authentication is enforced by the web server.
+    /// </remarks>
+    public Uri? MtlsTokenEndpointAliasUri { get; set; }
+
+    /// <summary>
+    /// Gets or sets the URI listed as the mTLS token
+    /// endpoint alias in the server configuration metadata.
+    /// </summary>
+    /// <remarks>
+    /// Note: this URI MUST be absolute and MUST point to a domain for
+    /// which TLS client authentication is enforced by the web server.
+    /// </remarks>
+    public Uri? MtlsUserInfoEndpointAliasUri { get; set; }
 
     /// <summary>
     /// Gets the token validation parameters used by the OpenIddict server services.
@@ -135,25 +201,24 @@ public class OpenIddictServerOptions
         // were issued with the generic "typ": "JWT" header. To prevent confused deputy and token substitution
         // attacks, a special "token_usage" claim was added to the JWT payload to convey the actual token type.
         // This validator overrides the default logic used by IdentityModel to resolve the type from this claim.
-        TypeValidator = (type, token, parameters) =>
+        TypeValidator = static (type, token, parameters) =>
         {
             // If available, try to resolve the actual type from the "token_usage" claim.
             if (((JsonWebToken) token).TryGetPayloadValue(OpenIddictConstants.Claims.TokenUsage, out string usage))
             {
                 type = usage switch
                 {
-                    TokenTypeHints.AccessToken => JsonWebTokenTypes.AccessToken,
-                    TokenTypeHints.IdToken     => JsonWebTokenTypes.IdentityToken,
+                    "access_token" => JsonWebTokenTypes.AccessToken,
+                    "id_token"     => JsonWebTokenTypes.GenericJsonWebToken,
 
                     _ => throw new NotSupportedException(SR.GetResourceString(SR.ID0269))
                 };
             }
 
-            // At this point, throw an exception if the type cannot be resolved from the "typ" header
-            // (provided via the type delegate parameter) or inferred from the token_usage claim.
+            // Assume that tokens that don't have an explicit "typ" header attached are generic JSON Web Tokens.
             if (string.IsNullOrEmpty(type))
             {
-                throw new SecurityTokenInvalidTypeException(SR.GetResourceString(SR.ID0270));
+                type = JsonWebTokenTypes.GenericJsonWebToken;
             }
 
             // Note: unlike IdentityModel, this custom validator deliberately uses case-insensitive comparisons.
@@ -206,6 +271,24 @@ public class OpenIddictServerOptions
     public TimeSpan? IdentityTokenLifetime { get; set; } = TimeSpan.FromMinutes(20);
 
     /// <summary>
+    /// Gets or sets the period of time issued tokens remain valid after being issued. The default value is 1 hour.
+    /// The client application is expected to refresh or acquire a new issued token after the token has expired.
+    /// While not recommended, this property can be set to <see langword="null"/> to issue issued tokens that never expire.
+    /// </summary>
+    /// <remarks>
+    /// Note: this property is not used when the requested token type is recognized and matches a token type internally
+    /// supported (e.g access token): in that case, the dedicated lifetime option is used instead of this value.
+    /// </remarks>
+    public TimeSpan? IssuedTokenLifetime { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Gets or sets the period of time request tokens remain valid after being issued. The default value is 1 hour.
+    /// The client application is expected to start a whole new authentication flow after the request token has expired.
+    /// While not recommended, this property can be set to <see langword="null"/> to issue request tokens that never expire.
+    /// </summary>
+    public TimeSpan? RequestTokenLifetime { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// Gets or sets the period of time refresh tokens remain valid after being issued. The default value is 14 days.
     /// The client application is expected to start a whole new authentication flow after the refresh token has expired.
     /// While not recommended, this property can be set to <see langword="null"/> to issue refresh tokens that never expire.
@@ -217,6 +300,35 @@ public class OpenIddictServerOptions
     /// used to make concurrent refresh token requests. The default value is 30 seconds.
     /// </summary>
     public TimeSpan? RefreshTokenReuseLeeway { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Gets the charset used by OpenIddict to generate random user codes.
+    /// </summary>
+    /// <remarks>
+    /// Note: user codes are meant to be used by humans, who may have to type them manually.
+    /// To ensure they remain easy enough to type even by users with non-Latin keyboards,
+    /// user codes generated by OpenIddict only include ASCII digits by default.
+    /// </remarks>
+    public HashSet<string> UserCodeCharset { get; } = new(StringComparer.Ordinal)
+    {
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"
+    };
+
+    /// <summary>
+    /// Gets or sets the format string used by OpenIddict to display user codes. While not recommended,
+    /// a <see langword="null"/> value can be used to disable the user code formatting logic.
+    /// </summary>
+    /// <remarks>
+    /// If no value is explicitly set, a default format using dash separators
+    /// is used to make user codes easier to read by the end users.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public string? UserCodeDisplayFormat { get; set; }
+
+    /// <summary>
+    /// Gets or sets the length of the user codes generated by OpenIddict (by default, 12 characters).
+    /// </summary>
+    public int UserCodeLength { get; set; } = 12;
 
     /// <summary>
     /// Gets or sets the period of time user codes remain valid after being issued. The default value is 10 minutes.
@@ -236,17 +348,20 @@ public class OpenIddictServerOptions
     public bool EnableDegradedMode { get; set; }
 
     /// <summary>
-    /// Gets the list of the handlers responsible of processing the OpenIddict server operations.
+    /// Gets the list of the handlers responsible for processing the OpenIddict server operations.
     /// Note: the list is automatically sorted based on the order assigned to each handler descriptor.
     /// As such, it MUST NOT be mutated after options initialization to preserve the exact order.
     /// </summary>
-    public List<OpenIddictServerHandlerDescriptor> Handlers { get; } = new(OpenIddictServerHandlers.DefaultHandlers);
+    public List<OpenIddictServerHandlerDescriptor> Handlers { get; } = [.. OpenIddictServerHandlers.DefaultHandlers];
 
     /// <summary>
     /// Gets or sets a boolean determining whether client identification is optional.
     /// Enabling this option allows client applications to communicate with the token,
     /// introspection and revocation endpoints without having to send their client identifier.
     /// </summary>
+    /// <remarks>
+    /// Setting this property to <see langword="true"/> is NOT recommended.
+    /// </remarks>
     public bool AcceptAnonymousClients { get; set; }
 
     /// <summary>
@@ -298,7 +413,21 @@ public class OpenIddictServerOptions
     /// returned by OpenIddict. Using this option is generally NOT recommended
     /// as it prevents the tokens and codes from being revoked (if needed).
     /// </summary>
+    /// <remarks>
+    /// Note: disabling token storage prevents the device authorization flow
+    /// from being used and automatically turns sliding expiration off.
+    /// </remarks>
     public bool DisableTokenStorage { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether audience validation is disabled.
+    /// </summary>
+    public bool DisableAudienceValidation { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether resource validation is disabled.
+    /// </summary>
+    public bool DisableResourceValidation { get; set; }
 
     /// <summary>
     /// Gets or sets a boolean indicating whether scope validation is disabled.
@@ -306,15 +435,94 @@ public class OpenIddictServerOptions
     public bool DisableScopeValidation { get; set; }
 
     /// <summary>
-    /// Gets the OAuth 2.0 code challenge methods enabled for this application.
-    /// By default, only the S256 method is allowed (if the code flow is enabled).
+    /// Gets or sets a boolean indicating whether requests received by the authorization
+    /// endpoint should be stored in the token store, which allows flowing
+    /// large payloads across requests. Enabling this option can be useful
+    /// for clients that do not supported pushed authorization requests.
     /// </summary>
-    public HashSet<string> CodeChallengeMethods { get; } = new(StringComparer.Ordinal);
+    public bool EnableAuthorizationRequestCaching { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether requests received
+    /// by the end session endpoint should be stored in the token store.
+    /// </summary>
+    public bool EnableEndSessionRequestCaching { get; set; }
+
+    /// <summary>
+    /// Gets the OAuth 2.0 token exchange actor token types enabled for this application.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public HashSet<string> ActorTokenTypes { get; } = new(StringComparer.Ordinal)
+    {
+        OpenIddictConstants.TokenTypeIdentifiers.AccessToken,
+        OpenIddictConstants.TokenTypeIdentifiers.IdentityToken,
+        OpenIddictConstants.TokenTypeIdentifiers.RefreshToken
+    };
+
+    /// <summary>
+    /// Gets the OAuth 2.0 audiences enabled for this application
+    /// (exclusively used with the OAuth 2.0 Token Exchange flow).
+    /// </summary>
+    public HashSet<string> Audiences { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets the OAuth 2.0 client assertion types enabled for this application.
+    /// </summary>
+    public HashSet<string> ClientAssertionTypes { get; } = new(StringComparer.Ordinal)
+    {
+        OpenIddictConstants.ClientAssertionTypes.JwtBearer
+    };
+
+    /// <summary>
+    /// Gets the OAuth 2.0 client authentication methods enabled for this application.
+    /// </summary>
+    public HashSet<string> ClientAuthenticationMethods { get; } = new(StringComparer.Ordinal)
+    {
+        // Note: client_secret_basic is deliberately not added here as it requires
+        // a dedicated event handler (typically provided by the host integration)
+        // to extract the client credentials from the standard Authorization header.
+        //
+        // Both the ASP.NET Core and OWIN hosts support the client_secret_basic
+        // authentication method and automatically add it to this list at runtime.
+        OpenIddictConstants.ClientAuthenticationMethods.ClientSecretPost,
+        OpenIddictConstants.ClientAuthenticationMethods.PrivateKeyJwt
+    };
+
+    /// <summary>
+    /// Gets the OAuth 2.0 code challenge methods enabled for this application.
+    /// </summary>
+    public HashSet<string> CodeChallengeMethods { get; } = new(StringComparer.Ordinal)
+    {
+        OpenIddictConstants.CodeChallengeMethods.Plain,
+        OpenIddictConstants.CodeChallengeMethods.Sha256
+    };
 
     /// <summary>
     /// Gets the OAuth 2.0/OpenID Connect flows enabled for this application.
     /// </summary>
     public HashSet<string> GrantTypes { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets the OpenID Connect prompt values enabled for this application.
+    /// </summary>
+    public HashSet<string> PromptValues { get; } = new(StringComparer.Ordinal)
+    {
+        // By default, only include the mandatory values defined in the core OpenID Connect specification.
+        // See https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest for more information.
+        OpenIddictConstants.PromptValues.Consent,
+        OpenIddictConstants.PromptValues.Login,
+        OpenIddictConstants.PromptValues.None,
+        OpenIddictConstants.PromptValues.SelectAccount
+    };
+
+    /// <summary>
+    /// Gets the OAuth 2.0 token exchange requested token types enabled for this application.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public HashSet<string> RequestedTokenTypes { get; } = new(StringComparer.Ordinal)
+    {
+        OpenIddictConstants.TokenTypeIdentifiers.AccessToken
+    };
 
     /// <summary>
     /// Gets or sets a boolean indicating whether PKCE must be used by client applications
@@ -323,6 +531,21 @@ public class OpenIddictServerOptions
     /// lack the code_challenge will be automatically rejected by OpenIddict.
     /// </summary>
     public bool RequireProofKeyForCodeExchange { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether pushed authorization requests must be used
+    /// by client applications when using an interactive flow like the authorization code or
+    /// implicit flows. If this property is set to <see langword="true"/>, authorization requests
+    /// that don't contain a request_uri parameter will be automatically rejected by OpenIddict.
+    /// </summary>
+    public bool RequirePushedAuthorizationRequests { get; set; }
+
+    /// <summary>
+    /// Gets the OAuth 2.0 resources enabled for this application (typically used
+    /// with the OAuth 2.0 Token Exchange flow and with authorization or pushed
+    /// authorization requests that include one or more resource indicators).
+    /// </summary>
+    public HashSet<Uri> Resources { get; } = [];
 
     /// <summary>
     /// Gets the OAuth 2.0/OpenID Connect response types enabled for this application.
@@ -334,30 +557,89 @@ public class OpenIddictServerOptions
     /// Gets the OAuth 2.0/OpenID Connect response modes enabled for this application.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Advanced)]
-    public HashSet<string> ResponseModes { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> ResponseModes { get; } = new(StringComparer.Ordinal)
+    {
+        OpenIddictConstants.ResponseModes.FormPost,
+        OpenIddictConstants.ResponseModes.Fragment,
+        OpenIddictConstants.ResponseModes.Query
+    };
+
+    /// <summary>
+    /// Gets the OAuth 2.0 token exchange subject token types enabled for this application.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public HashSet<string> SubjectTokenTypes { get; } = new(StringComparer.Ordinal)
+    {
+        OpenIddictConstants.TokenTypeIdentifiers.AccessToken,
+        OpenIddictConstants.TokenTypeIdentifiers.IdentityToken,
+        OpenIddictConstants.TokenTypeIdentifiers.RefreshToken
+    };
+
+    /// <summary>
+    /// Gets the OpenID Connect subject types enabled for this application.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public HashSet<string> SubjectTypes { get; } = new(StringComparer.Ordinal)
+    {
+        OpenIddictConstants.SubjectTypes.Public
+    };
+
+    /// <summary>
+    /// Gets or sets the default token type that is used as the requested token type when no
+    /// explicit value is requested by the client during an OAuth 2.0 token exchange flow.
+    /// </summary>
+    /// <remarks>
+    /// By default, an access token is always returned when no explicit value is requested.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public string DefaultRequestedTokenType { get; set; } = TokenTypeIdentifiers.AccessToken;
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether audience permissions should be ignored.
+    /// </summary>
+    /// <remarks>
+    /// Setting this property to <see langword="true"/> is NOT recommended.
+    /// </remarks>
+    public bool IgnoreAudiencePermissions { get; set; }
 
     /// <summary>
     /// Gets or sets a boolean indicating whether endpoint permissions should be ignored.
-    /// Setting this property to <see langword="true"/> is NOT recommended.
     /// </summary>
+    /// <remarks>
+    /// Setting this property to <see langword="true"/> is NOT recommended.
+    /// </remarks>
     public bool IgnoreEndpointPermissions { get; set; }
 
     /// <summary>
     /// Gets or sets a boolean indicating whether grant type permissions should be ignored.
-    /// Setting this property to <see langword="true"/> is NOT recommended.
     /// </summary>
+    /// <remarks>
+    /// Setting this property to <see langword="true"/> is NOT recommended.
+    /// </remarks>
     public bool IgnoreGrantTypePermissions { get; set; }
 
     /// <summary>
-    /// Gets or sets a boolean indicating whether response type permissions should be ignored.
-    /// Setting this property to <see langword="true"/> is NOT recommended.
+    /// Gets or sets a boolean indicating whether resource permissions should be ignored.
     /// </summary>
+    /// <remarks>
+    /// Setting this property to <see langword="true"/> is NOT recommended.
+    /// </remarks>
+    public bool IgnoreResourcePermissions { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether response type permissions should be ignored.
+    /// </summary>
+    /// <remarks>
+    /// Setting this property to <see langword="true"/> is NOT recommended.
+    /// </remarks>
     public bool IgnoreResponseTypePermissions { get; set; }
 
     /// <summary>
     /// Gets or sets a boolean indicating whether scope permissions should be ignored.
-    /// Setting this property to <see langword="true"/> is NOT recommended.
     /// </summary>
+    /// <remarks>
+    /// Setting this property to <see langword="true"/> is NOT recommended.
+    /// </remarks>
     public bool IgnoreScopePermissions { get; set; }
 
     /// <summary>
@@ -389,4 +671,65 @@ public class OpenIddictServerOptions
     /// that provides additional protection against token leakage.
     /// </summary>
     public bool UseReferenceRefreshTokens { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether access tokens should be bound to the
+    /// client certificate sent by public or confidential clients in the TLS handshake
+    /// of token requests.
+    /// </summary>
+    public bool UseClientCertificateBoundAccessTokens { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether access tokens should be bound to the
+    /// client certificate sent by public clients in the TLS handshake of token requests.
+    /// </summary>
+    /// <remarks>
+    /// Note: refresh tokens are only bound to the client certificate when the client
+    /// is a public application, as refresh tokens issued to confidential applications
+    /// are already sender-constrained via standard client authentication.
+    /// </remarks>
+    public bool UseClientCertificateBoundRefreshTokens { get; set; }
+
+    /// <summary>
+    /// Gets or sets the time provider.
+    /// </summary>
+    /// <remarks>
+    /// Note: if this property is not explicitly set, the time provider is
+    /// automatically resolved from the dependency injection container.
+    /// If no service can be found, <see cref="TimeProvider.System"/> is used.
+    /// </remarks>
+    public TimeProvider TimeProvider { get; set; } = default!;
+
+    /// <summary>
+    /// Gets or sets the chain policy used when validating PKI
+    /// client certificates used for OAuth 2.0 client authentication.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Note: this instance serves as a base policy and is merged with
+    /// the per-client policies resolved using the application manager.
+    /// </para>
+    /// <para>
+    /// Note: while it is possible to use a policy configured to use the
+    /// the system certificates store, doing so is strongly discouraged.
+    /// </para>
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public X509ChainPolicy? PublicKeyInfrastructureTlsClientAuthenticationPolicy { get; set; }
+
+    /// <summary>
+    /// Gets or sets the chain policy used when validating self-signed client
+    /// certificates used for OAuth 2.0 client authentication and/or token binding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Note: this instance serves as a base policy and is merged with
+    /// the per-client policies resolved using the application manager.
+    /// </para>
+    /// <para>
+    /// Note: while it is possible to use a policy configured to use the
+    /// the system certificates store, doing so is strongly discouraged.
+    /// </para>
+    /// </remarks>
+    public X509ChainPolicy? SelfSignedTlsClientAuthenticationPolicy { get; set; }
 }

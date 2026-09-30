@@ -21,13 +21,10 @@ public static class OpenIddictServerAspNetCoreExtensions
     /// </summary>
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictServerAspNetCoreBuilder"/> instance.</returns>
     public static OpenIddictServerAspNetCoreBuilder UseAspNetCore(this OpenIddictServerBuilder builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         builder.Services.AddAuthentication();
 
@@ -38,29 +35,35 @@ public static class OpenIddictServerAspNetCoreExtensions
         builder.Services.TryAdd(OpenIddictServerAspNetCoreHandlers.DefaultHandlers.Select(descriptor => descriptor.ServiceDescriptor));
 
         // Register the built-in filters used by the default OpenIddict ASP.NET Core server event handlers.
-        builder.Services.TryAddSingleton<RequireAuthorizationRequestCachingEnabled>();
         builder.Services.TryAddSingleton<RequireAuthorizationEndpointPassthroughEnabled>();
+        builder.Services.TryAddSingleton<RequireEndSessionEndpointPassthroughEnabled>();
         builder.Services.TryAddSingleton<RequireErrorPassthroughEnabled>();
         builder.Services.TryAddSingleton<RequireHttpRequest>();
-        builder.Services.TryAddSingleton<RequireLogoutRequestCachingEnabled>();
-        builder.Services.TryAddSingleton<RequireLogoutEndpointPassthroughEnabled>();
         builder.Services.TryAddSingleton<RequireTransportSecurityRequirementEnabled>();
         builder.Services.TryAddSingleton<RequireStatusCodePagesIntegrationEnabled>();
         builder.Services.TryAddSingleton<RequireTokenEndpointPassthroughEnabled>();
-        builder.Services.TryAddSingleton<RequireUserinfoEndpointPassthroughEnabled>();
+        builder.Services.TryAddSingleton<RequireUserInfoEndpointPassthroughEnabled>();
         builder.Services.TryAddSingleton<RequireVerificationEndpointPassthroughEnabled>();
 
-        // Register the option initializer used by the OpenIddict ASP.NET Core server integration services.
+        // Register the option initializers used by the OpenIddict ASP.NET Core server integration services.
         // Note: TryAddEnumerable() is used here to ensure the initializers are only registered once.
-        builder.Services.TryAddEnumerable(new[]
-        {
-            ServiceDescriptor.Singleton<IConfigureOptions<AuthenticationOptions>, OpenIddictServerAspNetCoreConfiguration>(),
-            ServiceDescriptor.Singleton<IPostConfigureOptions<AuthenticationOptions>, OpenIddictServerAspNetCoreConfiguration>(),
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IConfigureOptions<AuthenticationOptions>, OpenIddictServerAspNetCoreConfiguration>());
 
-            ServiceDescriptor.Singleton<IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerAspNetCoreConfiguration>(),
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IConfigureOptions<OpenIddictServerOptions>, OpenIddictServerAspNetCoreConfiguration>());
 
-            ServiceDescriptor.Singleton<IPostConfigureOptions<OpenIddictServerAspNetCoreOptions>, OpenIddictServerAspNetCoreConfiguration>()
-        });
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<AuthenticationOptions>, OpenIddictServerAspNetCoreConfiguration>());
+
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<OpenIddictServerOptions>, OpenIddictServerAspNetCoreConfiguration>());
+
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IValidateOptions<AuthenticationOptions>, OpenIddictServerAspNetCoreConfiguration>());
+
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IValidateOptions<OpenIddictServerAspNetCoreOptions>, OpenIddictServerAspNetCoreConfiguration>());
 
         return new OpenIddictServerAspNetCoreBuilder(builder.Services);
     }
@@ -71,19 +74,12 @@ public static class OpenIddictServerAspNetCoreExtensions
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <param name="configuration">The configuration delegate used to configure the server services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictServerBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictServerBuilder"/> instance.</returns>
     public static OpenIddictServerBuilder UseAspNetCore(
         this OpenIddictServerBuilder builder, Action<OpenIddictServerAspNetCoreBuilder> configuration)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(builder.UseAspNetCore());
 

@@ -21,13 +21,10 @@ public static class OpenIddictMongoDbExtensions
     /// </summary>
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
     public static OpenIddictMongoDbBuilder UseMongoDb(this OpenIddictCoreBuilder builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         // Note: Mongo uses simple binary comparison checks by default so the additional
         // query filtering applied by the default OpenIddict managers can be safely disabled.
@@ -35,20 +32,19 @@ public static class OpenIddictMongoDbExtensions
 
         builder.SetDefaultApplicationEntity<OpenIddictMongoDbApplication>()
                .SetDefaultAuthorizationEntity<OpenIddictMongoDbAuthorization>()
+               .SetDefaultResourceEntity<OpenIddictMongoDbResource>()
                .SetDefaultScopeEntity<OpenIddictMongoDbScope>()
+               .SetDefaultSessionEntity<OpenIddictMongoDbSession>()
                .SetDefaultTokenEntity<OpenIddictMongoDbToken>();
 
-        // Note: the Mongo stores/resolvers don't depend on scoped/transient services and thus
-        // can be safely registered as singleton services and shared/reused across requests.
-        builder.ReplaceApplicationStoreResolver<OpenIddictMongoDbApplicationStoreResolver>(ServiceLifetime.Singleton)
-               .ReplaceAuthorizationStoreResolver<OpenIddictMongoDbAuthorizationStoreResolver>(ServiceLifetime.Singleton)
-               .ReplaceScopeStoreResolver<OpenIddictMongoDbScopeStoreResolver>(ServiceLifetime.Singleton)
-               .ReplaceTokenStoreResolver<OpenIddictMongoDbTokenStoreResolver>(ServiceLifetime.Singleton);
-
-        builder.Services.TryAddSingleton(typeof(OpenIddictMongoDbApplicationStore<>));
-        builder.Services.TryAddSingleton(typeof(OpenIddictMongoDbAuthorizationStore<>));
-        builder.Services.TryAddSingleton(typeof(OpenIddictMongoDbScopeStore<>));
-        builder.Services.TryAddSingleton(typeof(OpenIddictMongoDbTokenStore<>));
+        // Note: the Mongo stores don't depend on scoped/transient services and thus can
+        // be safely registered as singleton services and shared/reused across requests.
+        builder.ReplaceApplicationStore<OpenIddictMongoDbApplication, OpenIddictMongoDbApplicationStore>(ServiceLifetime.Singleton)
+               .ReplaceAuthorizationStore<OpenIddictMongoDbAuthorization, OpenIddictMongoDbAuthorizationStore>(ServiceLifetime.Singleton)
+               .ReplaceResourceStore<OpenIddictMongoDbResource, OpenIddictMongoDbResourceStore>(ServiceLifetime.Singleton)
+               .ReplaceScopeStore<OpenIddictMongoDbScope, OpenIddictMongoDbScopeStore>(ServiceLifetime.Singleton)
+               .ReplaceSessionStore<OpenIddictMongoDbSession, OpenIddictMongoDbSessionStore>(ServiceLifetime.Singleton)
+               .ReplaceTokenStore<OpenIddictMongoDbToken, OpenIddictMongoDbTokenStore>(ServiceLifetime.Singleton);
 
         builder.Services.TryAddSingleton<IOpenIddictMongoDbContext, OpenIddictMongoDbContext>();
 
@@ -62,19 +58,12 @@ public static class OpenIddictMongoDbExtensions
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <param name="configuration">The configuration delegate used to configure the MongoDB services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictCoreBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictCoreBuilder"/> instance.</returns>
     public static OpenIddictCoreBuilder UseMongoDb(
         this OpenIddictCoreBuilder builder, Action<OpenIddictMongoDbBuilder> configuration)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(builder.UseMongoDb());
 

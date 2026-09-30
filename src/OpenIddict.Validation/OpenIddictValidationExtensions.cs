@@ -21,35 +21,45 @@ public static class OpenIddictValidationExtensions
     /// </summary>
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictValidationBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictValidationBuilder"/> instance.</returns>
     public static OpenIddictValidationBuilder AddValidation(this OpenIddictBuilder builder)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
 
         builder.Services.AddLogging();
         builder.Services.AddOptions();
 
         builder.Services.TryAddSingleton<OpenIddictValidationService>();
-        builder.Services.TryAddScoped<IOpenIddictValidationDispatcher, OpenIddictValidationDispatcher>();
-        builder.Services.TryAddScoped<IOpenIddictValidationFactory, OpenIddictValidationFactory>();
+        builder.Services.TryAddSingleton<IOpenIddictValidationDispatcher, OpenIddictValidationDispatcher>();
 
         // Register the built-in validation event handlers used by the OpenIddict validation components.
         // Note: the order used here is not important, as the actual order is set in the options.
         builder.Services.TryAdd(DefaultHandlers.Select(descriptor => descriptor.ServiceDescriptor));
 
         // Register the built-in filters used by the default OpenIddict validation event handlers.
+        builder.Services.TryAddSingleton<RequireAccessTokenExtracted>();
         builder.Services.TryAddSingleton<RequireAccessTokenValidated>();
         builder.Services.TryAddSingleton<RequireAuthorizationEntryValidationEnabled>();
+        builder.Services.TryAddSingleton<RequireAuthorizationIdResolved>();
+        builder.Services.TryAddSingleton<RequireClientAssertionGenerated>();
+        builder.Services.TryAddSingleton<RequireIntrospectionRequest>();
+        builder.Services.TryAddSingleton<RequireJsonWebTokenFormat>();
         builder.Services.TryAddSingleton<RequireLocalValidation>();
+        builder.Services.TryAddSingleton<RequireSessionEntryValidationEnabled>();
+        builder.Services.TryAddSingleton<RequireSessionIdResolved>();
+        builder.Services.TryAddSingleton<RequireTokenAudienceValidationEnabled>();
         builder.Services.TryAddSingleton<RequireTokenEntryValidationEnabled>();
-        builder.Services.TryAddSingleton<RequireIntrospectionValidation>();
+        builder.Services.TryAddSingleton<RequireTokenIdResolved>();
+        builder.Services.TryAddSingleton<RequireTokenLifetimeValidationEnabled>();
+        builder.Services.TryAddSingleton<RequireTokenPresenterValidationEnabled>();
+        builder.Services.TryAddSingleton<RequireTokenProofOfPossessionValidationEnabled>();
 
-        // Note: TryAddEnumerable() is used here to ensure the initializer is registered only once.
+        // Note: TryAddEnumerable() is used here to ensure the initializers are registered only once.
         builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<OpenIddictValidationOptions>, OpenIddictValidationConfiguration>());
+
+        builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IValidateOptions<OpenIddictValidationOptions>, OpenIddictValidationConfiguration>());
 
         return new OpenIddictValidationBuilder(builder.Services);
     }
@@ -60,20 +70,13 @@ public static class OpenIddictValidationExtensions
     /// <param name="builder">The services builder used by OpenIddict to register new services.</param>
     /// <param name="configuration">The configuration delegate used to configure the validation services.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictBuilder"/> instance.</returns>
     public static OpenIddictBuilder AddValidation(
         this OpenIddictBuilder builder,
         Action<OpenIddictValidationBuilder> configuration)
     {
-        if (builder is null)
-        {
-            throw new ArgumentNullException(nameof(builder));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(builder.AddValidation());
 

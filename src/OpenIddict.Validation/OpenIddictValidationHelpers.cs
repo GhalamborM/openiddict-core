@@ -17,19 +17,12 @@ public static class OpenIddictValidationHelpers
     /// <typeparam name="TProperty">The type of the property.</typeparam>
     /// <param name="transaction">The validation transaction.</param>
     /// <param name="name">The property name.</param>
-    /// <returns>The property value or <c>null</c> if it couldn't be found.</returns>
+    /// <returns>The property value or <see langword="null"/> if it couldn't be found.</returns>
     public static TProperty? GetProperty<TProperty>(
         this OpenIddictValidationTransaction transaction, string name) where TProperty : class
     {
-        if (transaction is null)
-        {
-            throw new ArgumentNullException(nameof(transaction));
-        }
-
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0106), nameof(name));
-        }
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentException.ThrowIfNullOrEmpty(name);
 
         if (transaction.Properties.TryGetValue(name, out var property) && property is TProperty result)
         {
@@ -51,15 +44,8 @@ public static class OpenIddictValidationHelpers
         this OpenIddictValidationTransaction transaction,
         string name, TProperty? value) where TProperty : class
     {
-        if (transaction is null)
-        {
-            throw new ArgumentNullException(nameof(transaction));
-        }
-
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0106), nameof(name));
-        }
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentException.ThrowIfNullOrEmpty(name);
 
         if (value is null)
         {

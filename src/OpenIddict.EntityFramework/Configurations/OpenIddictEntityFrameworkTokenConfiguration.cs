@@ -5,25 +5,32 @@
  */
 
 using System.ComponentModel;
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Data.Entity.Infrastructure.Annotations;
 using System.Data.Entity.ModelConfiguration;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq.Expressions;
 using OpenIddict.EntityFramework.Models;
 
 namespace OpenIddict.EntityFramework;
 
 /// <summary>
-/// Defines a relational mapping for the Token entity.
+/// Defines a relational mapping for the token entity.
 /// </summary>
-/// <typeparam name="TToken">The type of the Token entity.</typeparam>
-/// <typeparam name="TApplication">The type of the Application entity.</typeparam>
-/// <typeparam name="TAuthorization">The type of the Authorization entity.</typeparam>
-/// <typeparam name="TKey">The type of the Key entity.</typeparam>
+/// <typeparam name="TToken">The type of the token entity.</typeparam>
+/// <typeparam name="TApplication">The type of the application entity.</typeparam>
+/// <typeparam name="TAuthorization">The type of the authorization entity.</typeparam>
+/// <typeparam name="TSession">The type of the session entity.</typeparam>
+/// <typeparam name="TKey">The type of the primary key.</typeparam>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public class OpenIddictEntityFrameworkTokenConfiguration<TToken, TApplication, TAuthorization, TKey> : EntityTypeConfiguration<TToken>
-    where TToken : OpenIddictEntityFrameworkToken<TKey, TApplication, TAuthorization>
-    where TApplication : OpenIddictEntityFrameworkApplication<TKey, TAuthorization, TToken>
-    where TAuthorization : OpenIddictEntityFrameworkAuthorization<TKey, TApplication, TToken>
+public sealed class OpenIddictEntityFrameworkTokenConfiguration<
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TToken,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TApplication,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TAuthorization,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSession,
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TKey> : EntityTypeConfiguration<TToken>
+    where TToken : OpenIddictEntityFrameworkToken<TKey, TApplication, TAuthorization, TSession>
+    where TApplication : OpenIddictEntityFrameworkApplication<TKey, TAuthorization, TSession, TToken>
+    where TAuthorization : OpenIddictEntityFrameworkAuthorization<TKey, TApplication, TSession, TToken>
+    where TSession : OpenIddictEntityFrameworkSession<TKey, TApplication, TAuthorization, TToken>
     where TKey : notnull, IEquatable<TKey>
 {
     public OpenIddictEntityFrameworkTokenConfiguration()
@@ -32,27 +39,38 @@ public class OpenIddictEntityFrameworkTokenConfiguration<TToken, TApplication, T
         // Entity Framework would throw an exception due to the TKey generic parameter
         // being non-nullable when using value types like short, int, long or Guid.
 
-        HasKey(token => token.Id);
-
-        Property(token => token.ConcurrencyToken)
+        Property(static token => token.ConcurrencyToken)
             .HasMaxLength(50)
             .IsConcurrencyToken();
 
+        HasKey(static token => token.Id);
+
+        if (typeof(TKey) == typeof(string))
+        {
+            var parameter = Expression.Parameter(typeof(TToken), "token");
+            var property = Expression.Property(parameter,
+                typeof(TToken).GetProperty(nameof(OpenIddictEntityFrameworkToken.Id))!);
+            var lambda = Expression.Lambda<Func<TToken, string>>(property, parameter);
+
+            Property(lambda).HasMaxLength(100);
+        }
+
+        Property(static token => token.ReferenceId)
+            .HasMaxLength(100);
+
         // Warning: the index on the ReferenceId property MUST NOT be declared as
         // a unique index, as Entity Framework 6.x doesn't support creating indexes
-        // with null-friendly WHERE conditions, unlike Entity Framework Core 1.x/2.x.
-        Property(token => token.ReferenceId)
-            .HasMaxLength(100)
-            .HasColumnAnnotation(IndexAnnotation.AnnotationName, new IndexAnnotation(new IndexAttribute()));
+        // with null-friendly WHERE conditions, unlike Entity Framework Core.
+        HasIndex(static token => token.ReferenceId);
 
-        Property(token => token.Status)
+        Property(static token => token.Status)
             .HasMaxLength(50);
 
-        Property(token => token.Subject)
+        Property(static token => token.Subject)
             .HasMaxLength(400);
 
-        Property(token => token.Type)
-            .HasMaxLength(50);
+        Property(static token => token.Type)
+            .HasMaxLength(150);
 
         ToTable("OpenIddictTokens");
     }

@@ -16,13 +16,10 @@ public static class OpenIddictExtensions
     /// </summary>
     /// <param name="services">The services collection.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictBuilder"/> instance.</returns>
     public static OpenIddictBuilder AddOpenIddict(this IServiceCollection services)
     {
-        if (services is null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        ArgumentNullException.ThrowIfNull(services);
 
         return new OpenIddictBuilder(services);
     }
@@ -36,15 +33,8 @@ public static class OpenIddictExtensions
     /// <returns>The <see cref="IServiceCollection"/>.</returns>
     public static IServiceCollection AddOpenIddict(this IServiceCollection services, Action<OpenIddictBuilder> configuration)
     {
-        if (services is null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
-
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
 
         configuration(services.AddOpenIddict());
 

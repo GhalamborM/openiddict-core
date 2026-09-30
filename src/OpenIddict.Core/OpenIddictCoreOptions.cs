@@ -4,59 +4,114 @@
  * the license and the contributors participating to this project.
  */
 
+using System.ComponentModel;
+using System.Security.Cryptography;
+
 namespace OpenIddict.Core;
 
 /// <summary>
 /// Provides various settings needed to configure the OpenIddict core services.
 /// </summary>
-public class OpenIddictCoreOptions
+public sealed class OpenIddictCoreOptions
 {
     /// <summary>
-    /// Gets or sets the type corresponding to the default Application entity,
-    /// used by the non-generic application manager and the server/validation services.
+    /// Gets or sets the hash algorithm used to protect the client secrets (by default, SHA512).
     /// </summary>
-    public Type? DefaultApplicationType { get; set; }
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public HashAlgorithmName ClientSecretKeyDerivationHashAlgorithm { get; set; } = HashAlgorithmName.SHA512;
 
     /// <summary>
-    /// Gets or sets the type corresponding to the default Authorization entity,
-    /// used by the non-generic authorization manager and the server/validation services.
+    /// Gets or sets the number of iterations used to protect the client secrets (by default, 100 000).
     /// </summary>
-    public Type? DefaultAuthorizationType { get; set; }
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public int ClientSecretKeyDerivationIterations { get; set; } = 100_000;
 
     /// <summary>
-    /// Gets or sets the type corresponding to the default Scope entity,
-    /// used by the non-generic scope manager and the server/validation services.
+    /// Gets or sets the length (in bits) of the PBKDF2 key used to protect the client secrets (by default, 512 bits).
     /// </summary>
-    public Type? DefaultScopeType { get; set; }
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public int ClientSecretKeyDerivationOutputLength { get; set; } = 512;
 
     /// <summary>
-    /// Gets or sets the type corresponding to the default Token entity,
-    /// used by the non-generic token manager and the server/validation services.
+    /// Gets or sets the length (in bits) of the salt used to protect the client secrets (by default, 256 bits).
     /// </summary>
-    public Type? DefaultTokenType { get; set; }
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public int ClientSecretKeyDerivationSaltLength { get; set; } = 256;
 
     /// <summary>
     /// Gets or sets a boolean indicating whether additional filtering should be disabled,
     /// so that the OpenIddict managers don't execute a second check to ensure the results
     /// returned by the stores exactly match the specified query filters, casing included.
-    /// This property SHOULD NOT be set to <c>true</c> except when the underlying stores
+    /// This property SHOULD NOT be set to <see langword="true"/> except when the underlying stores
     /// are guaranteed to execute case-sensitive filtering at the database level.
     /// Disabling this feature MAY result in security vulnerabilities in the other cases.
     /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
     public bool DisableAdditionalFiltering { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether automatic client secret rehashing should be disabled.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public bool DisableAutomaticClientSecretRehashing { get; set; }
 
     /// <summary>
     /// Gets or sets a boolean indicating whether entity caching should be disabled.
     /// Disabling entity caching may have a noticeable impact on the performance
     /// of your application and result in multiple queries being sent by the stores.
     /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
     public bool DisableEntityCaching { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether authorizations pruning should be disabled.
+    /// </summary>
+    public bool DisableAutomaticAuthorizationPruning { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether sessions pruning should be disabled.
+    /// </summary>
+    public bool DisableAutomaticSessionPruning { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether tokens pruning should be disabled.
+    /// </summary>
+    public bool DisableAutomaticTokenPruning { get; set; }
 
     /// <summary>
     /// Gets or sets the maximum number of cached entries allowed. When the threshold
     /// is reached, the cache is automatically compacted to ensure it doesn't grow
     /// abnormally and doesn't cause a memory starvation or out-of-memory exceptions.
-    /// This property is not used when <see cref="DisableEntityCaching"/> is <c>true</c>.
+    /// This property is not used when <see cref="DisableEntityCaching"/> is <see langword="true"/>.
     /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
     public int EntityCacheLimit { get; set; } = 250;
+
+    /// <summary>
+    /// Gets or sets the minimum lifespan authorizations must have to be pruned.
+    /// By default, this value is set to 14 days and cannot be less than 10 minutes.
+    /// </summary>
+    public TimeSpan MinimumAuthorizationLifespan { get; set; } = TimeSpan.FromDays(14);
+
+    /// <summary>
+    /// Gets or sets the minimum lifespan sessions must have to be pruned.
+    /// By default, this value is set to 14 days and cannot be less than 10 minutes.
+    /// </summary>
+    public TimeSpan MinimumSessionLifespan { get; set; } = TimeSpan.FromDays(14);
+
+    /// <summary>
+    /// Gets or sets the minimum lifespan tokens must have to be pruned.
+    /// By default, this value is set to 14 days and cannot be less than 10 minutes.
+    /// </summary>
+    public TimeSpan MinimumTokenLifespan { get; set; } = TimeSpan.FromDays(14);
+
+    /// <summary>
+    /// Gets or sets the time provider.
+    /// </summary>
+    /// <remarks>
+    /// Note: if this property is not explicitly set, the time provider is
+    /// automatically resolved from the dependency injection container.
+    /// If no service can be found, <see cref="TimeProvider.System"/> is used.
+    /// </remarks>
+    public TimeProvider TimeProvider { get; set; } = default!;
 }

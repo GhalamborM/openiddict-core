@@ -6,6 +6,8 @@
 
 using System.ComponentModel;
 using System.Security.Claims;
+using System.Security.Cryptography.X509Certificates;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace OpenIddict.Validation;
@@ -30,6 +32,11 @@ public static partial class OpenIddictValidationEvents
         public OpenIddictValidationTransaction Transaction { get; }
 
         /// <summary>
+        /// Gets the cancellation token used to determine if the operation was aborted.
+        /// </summary>
+        public CancellationToken CancellationToken => Transaction.CancellationToken;
+
+        /// <summary>
         /// Gets or sets the endpoint type that handled the request, if applicable.
         /// </summary>
         public OpenIddictValidationEndpointType EndpointType
@@ -39,23 +46,48 @@ public static partial class OpenIddictValidationEvents
         }
 
         /// <summary>
-        /// Gets or sets the issuer address associated with the current transaction, if available.
+        /// Gets or sets the request <see cref="Uri"/> of the current transaction, if available.
         /// </summary>
-        public Uri? Issuer
+        public Uri? RequestUri
         {
-            get => Transaction.Issuer;
-            set => Transaction.Issuer = value;
+            get => Transaction.RequestUri;
+            set => Transaction.RequestUri = value;
         }
 
         /// <summary>
-        /// Gets the logger responsible of logging processed operations.
+        /// Gets or sets the base <see cref="Uri"/> of the host, if available.
         /// </summary>
-        public ILogger Logger => Transaction.Logger;
+        public Uri? BaseUri
+        {
+            get => Transaction.BaseUri;
+            set => Transaction.BaseUri = value;
+        }
+
+        /// <summary>
+        /// Gets or sets the server configuration used for the current request.
+        /// </summary>
+        public OpenIddictConfiguration Configuration
+        {
+            get => Transaction.Configuration;
+            set => Transaction.Configuration = value;
+        }
+
+        /// <summary>
+        /// Gets the logger responsible for logging processed operations.
+        /// </summary>
+        public ILogger Logger
+            => field ??= Transaction.ServiceProvider.GetRequiredService<ILogger<OpenIddictValidationDispatcher>>();
 
         /// <summary>
         /// Gets the OpenIddict validation options.
         /// </summary>
         public OpenIddictValidationOptions Options => Transaction.Options;
+
+        /// <summary>
+        /// Gets the service provider associated with the current transaction.
+        /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Advanced)]
+        public IServiceProvider ServiceProvider => Transaction.ServiceProvider;
     }
 
     /// <summary>
@@ -112,9 +144,21 @@ public static partial class OpenIddictValidationEvents
         }
 
         /// <summary>
-        /// Gets or sets the address of the external endpoint to communicate with.
+        /// Gets or sets the URI of the external endpoint to communicate with.
         /// </summary>
-        public Uri? Address { get; set; }
+        public Uri? RemoteUri { get; set; }
+
+        /// <summary>
+        /// Gets or sets the client authentication method used
+        /// when communicating with the external endpoint, if applicable.
+        /// </summary>
+        public string? ClientAuthenticationMethod { get; set; }
+
+        /// <summary>
+        /// Gets or sets the X.509 client certificate that will be used to authenticate
+        /// this peer when communicating with the external endpoint, if applicable.
+        /// </summary>
+        public X509Certificate2? LocalCertificate { get; set; }
     }
 
     /// <summary>
@@ -170,7 +214,7 @@ public static partial class OpenIddictValidationEvents
     /// <summary>
     /// Represents an event called when processing an incoming request.
     /// </summary>
-    public class ProcessRequestContext : BaseValidatingContext
+    public sealed class ProcessRequestContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessRequestContext"/> class.
@@ -184,7 +228,7 @@ public static partial class OpenIddictValidationEvents
     /// <summary>
     /// Represents an event called when processing an errored response.
     /// </summary>
-    public class ProcessErrorContext : BaseRequestContext
+    public sealed class ProcessErrorContext : BaseRequestContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessErrorContext"/> class.
@@ -195,7 +239,7 @@ public static partial class OpenIddictValidationEvents
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it couldn't be extracted.
+        /// Gets or sets the request, or <see langword="null"/> if it couldn't be extracted.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -223,7 +267,7 @@ public static partial class OpenIddictValidationEvents
         public string? ErrorDescription { get; set; }
 
         /// <summary>
-        /// Gets or sets the error URL returned to the caller.
+        /// Gets or sets the error URI returned to the caller.
         /// </summary>
         public string? ErrorUri { get; set; }
 
@@ -236,7 +280,7 @@ public static partial class OpenIddictValidationEvents
     /// <summary>
     /// Represents an event called when processing an authentication operation.
     /// </summary>
-    public class ProcessAuthenticationContext : BaseValidatingContext
+    public sealed class ProcessAuthenticationContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessAuthenticationContext"/> class.
@@ -256,6 +300,28 @@ public static partial class OpenIddictValidationEvents
         }
 
         /// <summary>
+        /// Gets or sets the URI of the introspection endpoint, if applicable.
+        /// </summary>
+        public Uri? IntrospectionEndpoint { get; set; }
+
+        /// <summary>
+        /// Gets or sets the client authentication method used when
+        /// communicating with the introspection endpoint, if applicable.
+        /// </summary>
+        public string? IntrospectionEndpointClientAuthenticationMethod { get; set; }
+
+        /// <summary>
+        /// Gets or sets the X.509 client certificate used when
+        /// communicating with the introspection endpoint, if applicable.
+        /// </summary>
+        public X509Certificate2? IntrospectionEndpointClientCertificate { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an introspection request should be sent.
+        /// </summary>
+        public bool SendIntrospectionRequest { get; set; }
+
+        /// <summary>
         /// Gets or sets the principal extracted from the access token, if applicable.
         /// </summary>
         public ClaimsPrincipal? AccessTokenPrincipal { get; set; }
@@ -266,26 +332,94 @@ public static partial class OpenIddictValidationEvents
         public string? AccessToken { get; set; }
 
         /// <summary>
-        /// Gets or sets a boolean indicating whether an access token
-        /// must be resolved for the authentication to considered valid.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// Gets or sets a boolean indicating whether an access
+        /// token should be extracted from the current context.
         /// </summary>
-        public bool RequireAccessToken { get; set; }
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool ExtractAccessToken { get; set; }
 
         /// <summary>
         /// Gets or sets a boolean indicating whether an access token
-        /// should be extracted from the current context and validated.
-        /// Note: overriding the value of this property is generally not
-        /// recommended, except when dealing with non-standard clients.
+        /// must be resolved for the authentication to be considered valid.
         /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RequireAccessToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether the access
+        /// token extracted from the current context should be validated.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
         public bool ValidateAccessToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether an invalid access token
+        /// will cause the authentication demand to be rejected or will be ignored.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool RejectAccessToken { get; set; }
+
+        /// <summary>
+        /// Gets or sets the request sent to the introspection endpoint, if applicable.
+        /// </summary>
+        public OpenIddictRequest? IntrospectionRequest { get; set; }
+
+        /// <summary>
+        /// Gets or sets the response returned by the introspection endpoint, if applicable.
+        /// </summary>
+        public OpenIddictResponse? IntrospectionResponse { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether a client assertion
+        /// token should be generated (and optionally included in the request).
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool GenerateClientAssertion { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether the generated client
+        /// assertion should be included as part of the request.
+        /// </summary>
+        /// <remarks>
+        /// Note: overriding the value of this property is generally not recommended.
+        /// </remarks>
+        public bool IncludeClientAssertion { get; set; }
+
+        /// <summary>
+        /// Gets or sets the generated client assertion, if applicable.
+        /// The client assertion will only be returned if
+        /// <see cref="IncludeClientAssertion"/> is set to <see langword="true"/>.
+        /// </summary>
+        public string? ClientAssertion { get; set; }
+
+        /// <summary>
+        /// Gets or sets type of the generated client assertion, if applicable.
+        /// The client assertion type will only be returned if
+        /// <see cref="IncludeClientAssertion"/> is set to <see langword="true"/>.
+        /// </summary>
+        public string? ClientAssertionType { get; set; }
+
+        /// <summary>
+        /// Gets or sets the principal containing the claims that will be
+        /// used to create the client assertion, if applicable.
+        /// </summary>
+        public ClaimsPrincipal? ClientAssertionPrincipal { get; set; }
     }
 
     /// <summary>
-    /// Represents an event called when processing a challenge response.
+    /// Represents an event called when processing a challenge operation.
     /// </summary>
-    public class ProcessChallengeContext : BaseValidatingContext
+    public sealed class ProcessChallengeContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ProcessChallengeContext"/> class.
@@ -314,7 +448,12 @@ public static partial class OpenIddictValidationEvents
         }
 
         /// <summary>
-        /// Gets the additional parameters returned to caller.
+        /// Gets the user-defined authentication properties, if available.
+        /// </summary>
+        public Dictionary<string, string?> Properties { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets the additional parameters returned to the caller.
         /// </summary>
         public Dictionary<string, OpenIddictParameter> Parameters { get; } = new(StringComparer.Ordinal);
     }

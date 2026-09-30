@@ -4,21 +4,19 @@
  * the license and the contributors participating to this project.
  */
 
-using System.Collections.Immutable;
+using System.ComponentModel;
 using System.Security.Claims;
 using System.Text.Json;
 using Properties = OpenIddict.Validation.DataProtection.OpenIddictValidationDataProtectionConstants.Properties;
 
 namespace OpenIddict.Validation.DataProtection;
 
-public class OpenIddictValidationDataProtectionFormatter : IOpenIddictValidationDataProtectionFormatter
+[EditorBrowsable(EditorBrowsableState.Advanced)]
+public sealed class OpenIddictValidationDataProtectionFormatter : IOpenIddictValidationDataProtectionFormatter
 {
     public ClaimsPrincipal ReadToken(BinaryReader reader)
     {
-        if (reader is null)
-        {
-            throw new ArgumentNullException(nameof(reader));
-        }
+        ArgumentNullException.ThrowIfNull(reader);
 
         var (principal, properties) = Read(reader);
 
@@ -27,32 +25,24 @@ public class OpenIddictValidationDataProtectionFormatter : IOpenIddictValidation
         // can be reused, well-known properties are manually mapped to their claims equivalents.
 
         return principal
-            .SetAudiences(GetArrayProperty(properties, Properties.Audiences))
-            .SetPresenters(GetArrayProperty(properties, Properties.Presenters))
-            .SetResources(GetArrayProperty(properties, Properties.Resources))
-            .SetScopes(GetArrayProperty(properties, Properties.Scopes))
+            .SetClaims(Claims.Private.Audience,  GetJsonProperty(properties, Properties.Audiences))
+            .SetClaims(Claims.Private.Presenter, GetJsonProperty(properties, Properties.Presenters))
+            .SetClaims(Claims.Private.Resource,  GetJsonProperty(properties, Properties.Resources))
+            .SetClaims(Claims.Private.Scope,     GetJsonProperty(properties, Properties.Scopes))
 
-            .SetClaim(Claims.Private.AccessTokenLifetime, GetProperty(properties, Properties.AccessTokenLifetime))
-            .SetClaim(Claims.Private.AuthorizationCodeLifetime, GetProperty(properties, Properties.AuthorizationCodeLifetime))
-            .SetClaim(Claims.Private.AuthorizationId, GetProperty(properties, Properties.InternalAuthorizationId))
-            .SetClaim(Claims.Private.CodeChallenge, GetProperty(properties, Properties.CodeChallenge))
-            .SetClaim(Claims.Private.CodeChallengeMethod, GetProperty(properties, Properties.CodeChallengeMethod))
-            .SetClaim(Claims.Private.CreationDate, GetProperty(properties, Properties.Issued))
-            .SetClaim(Claims.Private.DeviceCodeId, GetProperty(properties, Properties.DeviceCodeId))
-            .SetClaim(Claims.Private.DeviceCodeLifetime, GetProperty(properties, Properties.DeviceCodeLifetime))
-            .SetClaim(Claims.Private.IdentityTokenLifetime, GetProperty(properties, Properties.IdentityTokenLifetime))
-            .SetClaim(Claims.Private.ExpirationDate, GetProperty(properties, Properties.Expires))
-            .SetClaim(Claims.Private.Nonce, GetProperty(properties, Properties.Nonce))
-            .SetClaim(Claims.Private.RedirectUri, GetProperty(properties, Properties.OriginalRedirectUri))
-            .SetClaim(Claims.Private.RefreshTokenLifetime, GetProperty(properties, Properties.RefreshTokenLifetime))
-            .SetClaim(Claims.Private.TokenId, GetProperty(properties, Properties.InternalTokenId))
-            .SetClaim(Claims.Private.UserCodeLifetime, GetProperty(properties, Properties.UserCodeLifetime));
+            .SetClaim(Claims.Private.HostProperties, GetJsonProperty(properties, Properties.HostProperties))
+
+            .SetClaim(Claims.Private.AuthorizationId, GetStringProperty(properties, Properties.InternalAuthorizationId))
+            .SetClaim(Claims.Private.CreationDate,    GetStringProperty(properties, Properties.Issued))
+            .SetClaim(Claims.Private.ExpirationDate,  GetStringProperty(properties, Properties.Expires))
+            .SetClaim(Claims.Private.SessionId,       GetStringProperty(properties, Properties.InternalSessionId))
+            .SetClaim(Claims.Private.TokenId,         GetStringProperty(properties, Properties.InternalTokenId));
 
         static (ClaimsPrincipal principal, IReadOnlyDictionary<string, string> properties) Read(BinaryReader reader)
         {
             // Read the version of the format used to serialize the ticket.
             var version = reader.ReadInt32();
-            if (version != 5)
+            if (version is not 5)
             {
                 throw new InvalidOperationException(SR.GetResourceString(SR.ID0287));
             }
@@ -134,7 +124,7 @@ public class OpenIddictValidationDataProtectionFormatter : IOpenIddictValidation
         {
             // Read the version of the format used to serialize the properties.
             var version = reader.ReadInt32();
-            if (version != 1)
+            if (version is not 1)
             {
                 throw new InvalidOperationException(SR.GetResourceString(SR.ID0287));
             }
@@ -161,31 +151,18 @@ public class OpenIddictValidationDataProtectionFormatter : IOpenIddictValidation
             return value;
         }
 
-        static string? GetProperty(IReadOnlyDictionary<string, string> properties, string name)
-            => properties.TryGetValue(name, out var value) ? value : null;
-
-        static ImmutableArray<string> GetArrayProperty(IReadOnlyDictionary<string, string> properties, string name)
+        static JsonElement GetJsonProperty(IReadOnlyDictionary<string, string> properties, string name)
         {
             if (properties.TryGetValue(name, out var value))
             {
                 using var document = JsonDocument.Parse(value);
-                var builder = ImmutableArray.CreateBuilder<string>(document.RootElement.GetArrayLength());
-
-                foreach (var element in document.RootElement.EnumerateArray())
-                {
-                    var item = element.GetString();
-                    if (string.IsNullOrEmpty(item))
-                    {
-                        continue;
-                    }
-
-                    builder.Add(item);
-                }
-
-                return builder.ToImmutable();
+                return document.RootElement.Clone();
             }
 
-            return ImmutableArray.Create<string>();
+            return default;
         }
+
+        static string? GetStringProperty(IReadOnlyDictionary<string, string> properties, string name)
+            => properties.TryGetValue(name, out var value) ? value : null;
     }
 }

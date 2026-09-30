@@ -3,19 +3,37 @@
   <Import Project="Sdk.props" Sdk="Microsoft.DotNet.Arcade.Sdk" />
 
   <PropertyGroup>
-    <LangVersion>preview</LangVersion>
+    <LangVersion>14.0</LangVersion>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>preview</AnalysisLevel>
-    <NoWarn>$(NoWarn);CS1591;NU5118;NU5128</NoWarn>
+    <AnalysisLevel>9.0</AnalysisLevel>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591;NU5128</NoWarn>
+    <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <NuGetAuditMode>all</NuGetAuditMode>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <DebugSymbols>true</DebugSymbols>
     <DebugType>portable</DebugType>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <CodeAnalysisRuleset>$(MSBuildThisFileDirectory)eng\CodeAnalysis.ruleset</CodeAnalysisRuleset>
+    <SuppressSymbolPackageFormatValidation>true</SuppressSymbolPackageFormatValidation>
+    <EmbedAllSources>true</EmbedAllSources>
     <EnableXlfLocalization>false</EnableXlfLocalization>
+    <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+    <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Note: the EF Core SQLite package depends on a vulnerable version of SQLitePCLRaw.core.
+      Unfortunately, this package hasn't been updated to use the newer SourceGear.sqlite3 package,
+      which is not vulnerable. To work around that, this specific vulnerability is suppressed until
+      the EF Core team updates the package to use SourceGear.sqlite3 instead of SQLitePCLRaw.core.
+    -->
+
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
+  </ItemGroup>
 
   <PropertyGroup>
     <StrongNameKeyId>OpenIddict</StrongNameKeyId>
@@ -28,22 +46,116 @@
   </PropertyGroup>
 
   <PropertyGroup>
+    <MeziantouPolyfill_ExcludedPolyfills>$(MeziantouPolyfill_ExcludedPolyfills);M:System.OperatingSystem.</MeziantouPolyfill_ExcludedPolyfills>
+    <MeziantouPolyfill_ExcludedPolyfills>$(MeziantouPolyfill_ExcludedPolyfills);T:System.Net.Http.</MeziantouPolyfill_ExcludedPolyfills>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(DotNetRoot)' == '' ">
+    <DotNetRoot Condition=" '$(DOTNET_HOST_PATH)' != '' ">$([System.IO.Path]::GetDirectoryName($(DOTNET_HOST_PATH)))</DotNetRoot>
+    <DotNetRoot Condition=" '$(MSBuildRuntimeType)' != 'Core' ">$(ProgramFiles)\dotnet</DotNetRoot>
+  </PropertyGroup>
+
+  <ItemGroup Condition=" '$(DotNetRoot)' != '' ">
+    <AndroidPackFolders     Include="$(DotNetRoot)\packs\Microsoft.Android.Ref*" />
+    <IOSPackFolders         Include="$(DotNetRoot)\packs\Microsoft.iOS.Ref*" />
+    <MacCatalystPackFolders Include="$(DotNetRoot)\packs\Microsoft.MacCatalyst.Ref*" />
+    <MacOSPackFolders       Include="$(DotNetRoot)\packs\Microsoft.macOS.Ref*" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <AndroidPackPaths>@(AndroidPackFolders->'%(FullPath)')</AndroidPackPaths>
+    <IOSPackPaths>@(IOSPackFolders->'%(FullPath)')</IOSPackPaths>
+    <MacCatalystPackPaths>@(MacCatalystPackFolders->'%(FullPath)')</MacCatalystPackPaths>
+    <MacOSPackPaths>@(MacOSPackFolders->'%(FullPath)')</MacOSPackPaths>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      Note: targeting Android, iOS, Mac Catalyst or macOS requires installing the corresponding .NET workload.
+      To ensure the solution can be built on machines that don't have the appropriate workloads installed,
+      the platform-specific target framework monikers are only used if the corresponding .NET pack is present.
+    -->
+    <SupportsAndroidTargeting
+      Condition=" '$(SupportsAndroidTargeting)' == '' And
+                  ($([System.OperatingSystem]::IsMacOS()) Or $([System.OperatingSystem]::IsWindows())) And
+                 ('$(GITHUB_ACTIONS)' == 'true' Or '$(AndroidPackPaths)' != '') ">true</SupportsAndroidTargeting>
+
+    <SupportsIOSTargeting
+      Condition=" '$(SupportsIOSTargeting)' == '' And
+                  ($([System.OperatingSystem]::IsMacOS()) Or $([System.OperatingSystem]::IsWindows())) And
+                 ('$(GITHUB_ACTIONS)' == 'true' Or '$(IOSPackPaths)' != '') ">true</SupportsIOSTargeting>
+
+    <SupportsMacCatalystTargeting
+      Condition=" '$(SupportsMacCatalystTargeting)' == '' And
+                  ($([System.OperatingSystem]::IsMacOS()) Or $([System.OperatingSystem]::IsWindows())) And
+                 ('$(GITHUB_ACTIONS)' == 'true' Or '$(MacCatalystPackPaths)' != '') ">true</SupportsMacCatalystTargeting>
+
+    <SupportsMacOSTargeting
+      Condition=" '$(SupportsMacOSTargeting)' == '' And
+                  ($([System.OperatingSystem]::IsMacOS()) Or $([System.OperatingSystem]::IsWindows())) And
+                 ('$(GITHUB_ACTIONS)' == 'true' Or '$(MacOSPackPaths)' != '') ">true</SupportsMacOSTargeting>
+
+    <!--
+      Note: while <EnableWindowsTargeting>true</EnableWindowsTargeting> can be used to force targeting
+      Windows on non-Windows platforms, Windows-specific targets are only used when running on Windows
+      to speed up the build on non-Windows platforms.
+    -->
+    <SupportsWindowsTargeting
+      Condition=" '$(SupportsWindowsTargeting)' == '' And $([System.OperatingSystem]::IsWindows()) ">true</SupportsWindowsTargeting>
+
+    <NetFrameworkTargetFrameworks Condition=" '$(NetFrameworkTargetFrameworks)' == '' ">
+      net48
+    </NetFrameworkTargetFrameworks>
+
+    <NetCoreTargetFrameworks Condition=" '$(NetCoreTargetFrameworks)' == '' ">
+      net10.0
+    </NetCoreTargetFrameworks>
+
+    <NetCoreAndroidTargetFrameworks
+      Condition=" '$(NetCoreAndroidTargetFrameworks)' == '' And '$(SupportsAndroidTargeting)' == 'true' ">
+      net10.0-android
+    </NetCoreAndroidTargetFrameworks>
+
+    <NetCoreIOSTargetFrameworks
+      Condition=" '$(NetCoreIOSTargetFrameworks)' == '' And '$(SupportsIOSTargeting)' == 'true' ">
+      net10.0-ios
+    </NetCoreIOSTargetFrameworks>
+
+    <NetCoreMacCatalystTargetFrameworks
+      Condition=" '$(NetCoreMacCatalystTargetFrameworks)' == '' And '$(SupportsMacCatalystTargeting)' == 'true' ">
+      net10.0-maccatalyst
+    </NetCoreMacCatalystTargetFrameworks>
+
+    <NetCoreMacOSTargetFrameworks
+      Condition=" '$(NetCoreMacOSTargetFrameworks)' == '' And '$(SupportsMacOSTargeting)' == 'true' ">
+      net10.0-macos
+    </NetCoreMacOSTargetFrameworks>
+
+    <NetCoreWindowsTargetFrameworks
+      Condition=" '$(NetCoreWindowsTargetFrameworks)' == '' And '$(SupportsWindowsTargeting)' == 'true' ">
+      net10.0-windows7.0;
+      net10.0-windows10.0.17763
+    </NetCoreWindowsTargetFrameworks>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <Authors>Kévin Chalet</Authors>
     <Company>$(Authors)</Company>
     <Product>OpenIddict</Product>
     <_ProjectCopyright>© Kévin Chalet. All rights reserved.</_ProjectCopyright>
     <PackageIconFullPath>$(MSBuildThisFileDirectory)package-icon.png</PackageIconFullPath>
-    <PackageProjectUrl>https://github.com/openiddict/openiddict-core</PackageProjectUrl>
+    <PackageProjectUrl>https://openiddict.com/</PackageProjectUrl>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageTags>authentication;jwt;openidconnect;openiddict;security</PackageTags>
     <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>git://github.com/openiddict/openiddict-core</RepositoryUrl>
+    <RepositoryUrl>https://github.com/openiddict/openiddict-core.git</RepositoryUrl>
   </PropertyGroup>
 
   <PropertyGroup>
     <RepoRelativeProjectDir>$([MSBuild]::MakeRelative($(RepoRoot), $(MSBuildProjectDirectory)))</RepoRelativeProjectDir>
     <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
-    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddTfmSpecificPlaceholders</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
   <!--
@@ -55,6 +167,15 @@
     <OfficialBuildId>$(_ComputedOfficialBuildId)</OfficialBuildId>
   </PropertyGroup>
 
+  <PropertyGroup Condition=" $(RepoRelativeProjectDir.Contains('sandbox')) ">
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IncludeSymbols>false</IncludeSymbols>
+    <IsPackable>false</IsPackable>
+    <IsShipping>false</IsShipping>
+    <Serviceable>false</Serviceable>
+    <SignAssembly>false</SignAssembly>
+  </PropertyGroup>
+
   <PropertyGroup Condition=" $(RepoRelativeProjectDir.Contains('src')) ">
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
@@ -63,9 +184,18 @@
     <Serviceable>false</Serviceable>
   </PropertyGroup>
 
+  <PropertyGroup Condition=" $(RepoRelativeProjectDir.Contains('src')) Or $(RepoRelativeProjectDir.Contains('test')) ">
+    <IncludeInternalExtensions Condition=" '$(IncludeInternalExtensions)' == '' ">true</IncludeInternalExtensions>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectCapability Include="DynamicDependentFile" />
     <ProjectCapability Include="DynamicFileNesting" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(IncludeInternalExtensions)' == 'true' ">
+    <Compile Include="$(MSBuildThisFileDirectory)shared\OpenIddict.Extensions\*.cs" Visible="false" />
+    <Using Include="OpenIddict.Extensions" />
   </ItemGroup>
 
 </Project>

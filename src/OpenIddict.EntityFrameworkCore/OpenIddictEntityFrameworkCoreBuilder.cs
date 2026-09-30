@@ -5,6 +5,8 @@
  */
 
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenIddict.Core;
 using OpenIddict.EntityFrameworkCore;
 using OpenIddict.EntityFrameworkCore.Models;
@@ -14,7 +16,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>
 /// Exposes the necessary methods required to configure the OpenIddict Entity Framework Core services.
 /// </summary>
-public class OpenIddictEntityFrameworkCoreBuilder
+public sealed class OpenIddictEntityFrameworkCoreBuilder
 {
     /// <summary>
     /// Initializes a new instance of <see cref="OpenIddictEntityFrameworkCoreBuilder"/>.
@@ -30,17 +32,26 @@ public class OpenIddictEntityFrameworkCoreBuilder
     public IServiceCollection Services { get; }
 
     /// <summary>
+    /// Enables validation of options during application startup.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/> instance.</returns>
+    public OpenIddictEntityFrameworkCoreBuilder ValidateOnStart()
+    {
+        Services.AddOptionsWithValidateOnStart<OpenIddictEntityFrameworkCoreOptions>();
+
+        return this;
+    }
+
+    /// <summary>
     /// Amends the default OpenIddict Entity Framework Core configuration.
     /// </summary>
     /// <param name="configuration">The delegate used to configure the OpenIddict options.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/> instance.</returns>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
     public OpenIddictEntityFrameworkCoreBuilder Configure(Action<OpenIddictEntityFrameworkCoreOptions> configuration)
     {
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(configuration);
 
         Services.Configure(configuration);
 
@@ -48,36 +59,81 @@ public class OpenIddictEntityFrameworkCoreBuilder
     }
 
     /// <summary>
+    /// Prevents the Entity Framework Core stores from using bulk operations.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/> instance.</returns>
+    public OpenIddictEntityFrameworkCoreBuilder DisableBulkOperations()
+        => Configure(options => options.DisableBulkOperations = true);
+
+    /// <summary>
     /// Configures OpenIddict to use the default OpenIddict
     /// Entity Framework Core entities, with the specified key type.
     /// </summary>
-    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/>.</returns>
-    public OpenIddictEntityFrameworkCoreBuilder ReplaceDefaultEntities<TKey>()
+    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/> instance.</returns>
+    public OpenIddictEntityFrameworkCoreBuilder ReplaceDefaultEntities<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TKey>()
         where TKey : notnull, IEquatable<TKey>
         => ReplaceDefaultEntities<OpenIddictEntityFrameworkCoreApplication<TKey>,
                                   OpenIddictEntityFrameworkCoreAuthorization<TKey>,
+                                  OpenIddictEntityFrameworkCoreResource<TKey>,
                                   OpenIddictEntityFrameworkCoreScope<TKey>,
+                                  OpenIddictEntityFrameworkCoreSession<TKey>,
                                   OpenIddictEntityFrameworkCoreToken<TKey>, TKey>();
 
     /// <summary>
     /// Configures OpenIddict to use the specified entities, derived
     /// from the default OpenIddict Entity Framework Core entities.
     /// </summary>
-    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/>.</returns>
-    public OpenIddictEntityFrameworkCoreBuilder ReplaceDefaultEntities<TApplication, TAuthorization, TScope, TToken, TKey>()
-        where TApplication : OpenIddictEntityFrameworkCoreApplication<TKey, TAuthorization, TToken>
-        where TAuthorization : OpenIddictEntityFrameworkCoreAuthorization<TKey, TApplication, TToken>
+    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/> instance.</returns>
+    public OpenIddictEntityFrameworkCoreBuilder ReplaceDefaultEntities<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TApplication,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TAuthorization,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TResource,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TScope,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSession,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TToken,
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TKey>()
+        where TApplication : OpenIddictEntityFrameworkCoreApplication<TKey, TAuthorization, TSession, TToken>
+        where TAuthorization : OpenIddictEntityFrameworkCoreAuthorization<TKey, TApplication, TSession, TToken>
+        where TResource : OpenIddictEntityFrameworkCoreResource<TKey>
         where TScope : OpenIddictEntityFrameworkCoreScope<TKey>
-        where TToken : OpenIddictEntityFrameworkCoreToken<TKey, TApplication, TAuthorization>
+        where TSession : OpenIddictEntityFrameworkCoreSession<TKey, TApplication, TAuthorization, TToken>
+        where TToken : OpenIddictEntityFrameworkCoreToken<TKey, TApplication, TAuthorization, TSession>
         where TKey : notnull, IEquatable<TKey>
     {
-        Services.Configure<OpenIddictCoreOptions>(options =>
+        // If the specified key type isn't a string (which is special-cased by the stores to avoid having to resolve
+        // a TypeDescriptor instance) and the platform supports type registration, register the key type to ensure the
+        // TypeDescriptor associated with that type will be preserved by the IL Linker and can be resolved at runtime.
+        if (typeof(TKey) != typeof(string))
         {
-            options.DefaultApplicationType = typeof(TApplication);
-            options.DefaultAuthorizationType = typeof(TAuthorization);
-            options.DefaultScopeType = typeof(TScope);
-            options.DefaultTokenType = typeof(TToken);
-        });
+            TypeDescriptor.RegisterType<TKey>();
+        }
+
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictApplicationManager>(static provider =>
+            provider.GetRequiredService<OpenIddictApplicationManager<TApplication>>()));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictAuthorizationManager>(static provider =>
+            provider.GetRequiredService<OpenIddictAuthorizationManager<TAuthorization>>()));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictResourceManager>(static provider =>
+            provider.GetRequiredService<OpenIddictResourceManager<TResource>>()));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictScopeManager>(static provider =>
+            provider.GetRequiredService<OpenIddictScopeManager<TScope>>()));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictSessionManager>(static provider =>
+            provider.GetRequiredService<OpenIddictSessionManager<TSession>>()));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictTokenManager>(static provider =>
+            provider.GetRequiredService<OpenIddictTokenManager<TToken>>()));
+
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictApplicationStore<TApplication>,
+            OpenIddictEntityFrameworkCoreApplicationStore<TApplication, TAuthorization, TSession, TToken, TKey>>());
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictAuthorizationStore<TAuthorization>,
+            OpenIddictEntityFrameworkCoreAuthorizationStore<TAuthorization, TApplication, TSession, TToken, TKey>>());
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictResourceStore<TResource>,
+            OpenIddictEntityFrameworkCoreResourceStore<TResource, TKey>>());
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictScopeStore<TScope>,
+            OpenIddictEntityFrameworkCoreScopeStore<TScope, TKey>>());
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictSessionStore<TSession>,
+            OpenIddictEntityFrameworkCoreSessionStore<TSession, TApplication, TAuthorization, TToken, TKey>>());
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictTokenStore<TToken>,
+            OpenIddictEntityFrameworkCoreTokenStore<TToken, TApplication, TAuthorization, TSession, TKey>>());
 
         return this;
     }
@@ -86,34 +142,18 @@ public class OpenIddictEntityFrameworkCoreBuilder
     /// Configures the OpenIddict Entity Framework Core stores to use the specified database context type.
     /// </summary>
     /// <typeparam name="TContext">The type of the <see cref="DbContext"/> used by OpenIddict.</typeparam>
-    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/>.</returns>
-    public OpenIddictEntityFrameworkCoreBuilder UseDbContext<TContext>()
-        where TContext : DbContext
-        => UseDbContext(typeof(TContext));
-
-    /// <summary>
-    /// Configures the OpenIddict Entity Framework Core stores to use the specified database context type.
-    /// </summary>
-    /// <param name="type">The type of the <see cref="DbContext"/> used by OpenIddict.</param>
-    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/>.</returns>
-    public OpenIddictEntityFrameworkCoreBuilder UseDbContext(Type type)
+    /// <returns>The <see cref="OpenIddictEntityFrameworkCoreBuilder"/> instance.</returns>
+    public OpenIddictEntityFrameworkCoreBuilder UseDbContext<TContext>() where TContext : DbContext
     {
-        if (type is null)
-        {
-            throw new ArgumentNullException(nameof(type));
-        }
+        Services.Replace(ServiceDescriptor.Scoped<
+            IOpenIddictEntityFrameworkCoreContext, OpenIddictEntityFrameworkCoreContext<TContext>>());
 
-        if (!typeof(DbContext).IsAssignableFrom(type))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0232), nameof(type));
-        }
-
-        return Configure(options => options.DbContextType = type);
+        return this;
     }
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public override bool Equals(object? obj) => base.Equals(obj);
+    public override bool Equals([NotNullWhen(true)] object? obj) => base.Equals(obj);
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]

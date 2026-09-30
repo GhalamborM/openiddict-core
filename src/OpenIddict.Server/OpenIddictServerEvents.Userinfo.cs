@@ -5,7 +5,7 @@
  */
 
 using System.Security.Claims;
-using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace OpenIddict.Server;
 
@@ -15,18 +15,18 @@ public static partial class OpenIddictServerEvents
     /// Represents an event called for each request to the userinfo endpoint to give the user code
     /// a chance to manually extract the userinfo request from the ambient HTTP context.
     /// </summary>
-    public class ExtractUserinfoRequestContext : BaseValidatingContext
+    public sealed class ExtractUserInfoRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ExtractUserinfoRequestContext"/> class.
+        /// Creates a new instance of the <see cref="ExtractUserInfoRequestContext"/> class.
         /// </summary>
-        public ExtractUserinfoRequestContext(OpenIddictServerTransaction transaction)
+        public ExtractUserInfoRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it wasn't extracted yet.
+        /// Gets or sets the request, or <see langword="null"/> if it wasn't extracted yet.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -39,12 +39,12 @@ public static partial class OpenIddictServerEvents
     /// Represents an event called for each request to the userinfo endpoint
     /// to determine if the request is valid and should continue to be processed.
     /// </summary>
-    public class ValidateUserinfoRequestContext : BaseValidatingContext
+    public sealed class ValidateUserInfoRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ValidateUserinfoRequestContext"/> class.
+        /// Creates a new instance of the <see cref="ValidateUserInfoRequestContext"/> class.
         /// </summary>
-        public ValidateUserinfoRequestContext(OpenIddictServerTransaction transaction)
+        public ValidateUserInfoRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
@@ -61,19 +61,19 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets or sets the security principal extracted from the access token, if available.
         /// </summary>
-        public ClaimsPrincipal? Principal { get; set; }
+        public ClaimsPrincipal? AccessTokenPrincipal { get; set; }
     }
 
     /// <summary>
     /// Represents an event called for each validated userinfo request
     /// to allow the user code to decide how the request should be handled.
     /// </summary>
-    public class HandleUserinfoRequestContext : BaseValidatingContext
+    public sealed class HandleUserInfoRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="HandleUserinfoRequestContext"/> class.
+        /// Creates a new instance of the <see cref="HandleUserInfoRequestContext"/> class.
         /// </summary>
-        public HandleUserinfoRequestContext(OpenIddictServerTransaction transaction)
+        public HandleUserInfoRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
@@ -90,7 +90,7 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets or sets the security principal extracted from the access token.
         /// </summary>
-        public ClaimsPrincipal Principal { get; set; } = default!;
+        public ClaimsPrincipal AccessTokenPrincipal { get; set; } = default!;
 
         /// <summary>
         /// Gets the additional claims returned to the client application.
@@ -102,12 +102,12 @@ public static partial class OpenIddictServerEvents
         /// Note: this value should only be populated if the "address"
         /// scope was requested and accepted by the resource owner.
         /// </summary>
-        public JsonElement Address { get; set; }
+        public JsonObject? Address { get; set; }
 
         /// <summary>
         /// Gets or sets the values used for the "aud" claim.
         /// </summary>
-        public HashSet<string> Audiences { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> Audiences { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets or sets the value used for the "birthdate" claim.
@@ -143,6 +143,11 @@ public static partial class OpenIddictServerEvents
         /// scope was requested and accepted by the resource owner.
         /// </summary>
         public string? GivenName { get; set; }
+
+        /// <summary>
+        /// Gets or sets the value used for the "iss" claim.
+        /// </summary>
+        public Uri? Issuer { get; set; }
 
         /// <summary>
         /// Gets or sets the value used for the "phone_number" claim.
@@ -189,18 +194,18 @@ public static partial class OpenIddictServerEvents
     /// <summary>
     /// Represents an event called before the userinfo response is returned to the caller.
     /// </summary>
-    public class ApplyUserinfoResponseContext : BaseRequestContext
+    public sealed class ApplyUserInfoResponseContext : BaseRequestContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ApplyUserinfoResponseContext"/> class.
+        /// Creates a new instance of the <see cref="ApplyUserInfoResponseContext"/> class.
         /// </summary>
-        public ApplyUserinfoResponseContext(OpenIddictServerTransaction transaction)
+        public ApplyUserInfoResponseContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it couldn't be extracted.
+        /// Gets or sets the request, or <see langword="null"/> if it couldn't be extracted.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -220,7 +225,7 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets the error code returned to the client application.
         /// When the response indicates a successful response,
-        /// this property returns <c>null</c>.
+        /// this property returns <see langword="null"/>.
         /// </summary>
         public string? Error => Response.Error;
     }

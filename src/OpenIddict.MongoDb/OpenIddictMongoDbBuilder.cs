@@ -5,6 +5,8 @@
  */
 
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using OpenIddict.Core;
 using OpenIddict.MongoDb;
 using OpenIddict.MongoDb.Models;
@@ -14,7 +16,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>
 /// Exposes the necessary methods required to configure the OpenIddict MongoDB services.
 /// </summary>
-public class OpenIddictMongoDbBuilder
+public sealed class OpenIddictMongoDbBuilder
 {
     /// <summary>
     /// Initializes a new instance of <see cref="OpenIddictMongoDbBuilder"/>.
@@ -30,17 +32,26 @@ public class OpenIddictMongoDbBuilder
     public IServiceCollection Services { get; }
 
     /// <summary>
+    /// Enables validation of options during application startup.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder ValidateOnStart()
+    {
+        Services.AddOptionsWithValidateOnStart<OpenIddictMongoDbOptions>();
+
+        return this;
+    }
+
+    /// <summary>
     /// Amends the default OpenIddict MongoDB configuration.
     /// </summary>
     /// <param name="configuration">The delegate used to configure the OpenIddict options.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
     public OpenIddictMongoDbBuilder Configure(Action<OpenIddictMongoDbOptions> configuration)
     {
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(configuration);
 
         Services.Configure(configuration);
 
@@ -50,11 +61,16 @@ public class OpenIddictMongoDbBuilder
     /// <summary>
     /// Configures OpenIddict to use the specified entity as the default application entity.
     /// </summary>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
-    public OpenIddictMongoDbBuilder ReplaceDefaultApplicationEntity<TApplication>()
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder ReplaceDefaultApplicationEntity<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TApplication>()
         where TApplication : OpenIddictMongoDbApplication
     {
-        Services.Configure<OpenIddictCoreOptions>(options => options.DefaultApplicationType = typeof(TApplication));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictApplicationManager>(static provider =>
+            provider.GetRequiredService<OpenIddictApplicationManager<TApplication>>()));
+
+        Services.Replace(ServiceDescriptor.Singleton<
+            IOpenIddictApplicationStore<TApplication>, OpenIddictMongoDbApplicationStore<TApplication>>());
 
         return this;
     }
@@ -62,11 +78,33 @@ public class OpenIddictMongoDbBuilder
     /// <summary>
     /// Configures OpenIddict to use the specified entity as the default authorization entity.
     /// </summary>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
-    public OpenIddictMongoDbBuilder ReplaceDefaultAuthorizationEntity<TAuthorization>()
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder ReplaceDefaultAuthorizationEntity<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TAuthorization>()
         where TAuthorization : OpenIddictMongoDbAuthorization
     {
-        Services.Configure<OpenIddictCoreOptions>(options => options.DefaultAuthorizationType = typeof(TAuthorization));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictAuthorizationManager>(static provider =>
+            provider.GetRequiredService<OpenIddictAuthorizationManager<TAuthorization>>()));
+
+        Services.Replace(ServiceDescriptor.Singleton<
+            IOpenIddictAuthorizationStore<TAuthorization>, OpenIddictMongoDbAuthorizationStore<TAuthorization>>());
+
+        return this;
+    }
+
+    /// <summary>
+    /// Configures OpenIddict to use the specified entity as the default resource entity.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder ReplaceDefaultResourceEntity<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TResource>()
+        where TResource : OpenIddictMongoDbResource
+    {
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictResourceManager>(static provider =>
+            provider.GetRequiredService<OpenIddictResourceManager<TResource>>()));
+
+        Services.Replace(ServiceDescriptor.Singleton<
+            IOpenIddictResourceStore<TResource>, OpenIddictMongoDbResourceStore<TResource>>());
 
         return this;
     }
@@ -74,11 +112,33 @@ public class OpenIddictMongoDbBuilder
     /// <summary>
     /// Configures OpenIddict to use the specified entity as the default scope entity.
     /// </summary>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
-    public OpenIddictMongoDbBuilder ReplaceDefaultScopeEntity<TScope>()
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder ReplaceDefaultScopeEntity<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TScope>()
         where TScope : OpenIddictMongoDbScope
     {
-        Services.Configure<OpenIddictCoreOptions>(options => options.DefaultScopeType = typeof(TScope));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictScopeManager>(static provider =>
+            provider.GetRequiredService<OpenIddictScopeManager<TScope>>()));
+
+        Services.Replace(ServiceDescriptor.Singleton<
+            IOpenIddictScopeStore<TScope>, OpenIddictMongoDbScopeStore<TScope>>());
+
+        return this;
+    }
+
+    /// <summary>
+    /// Configures OpenIddict to use the specified entity as the default session entity.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder ReplaceDefaultSessionEntity<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TSession>()
+        where TSession : OpenIddictMongoDbSession
+    {
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictSessionManager>(static provider =>
+            provider.GetRequiredService<OpenIddictSessionManager<TSession>>()));
+
+        Services.Replace(ServiceDescriptor.Singleton<
+            IOpenIddictSessionStore<TSession>, OpenIddictMongoDbSessionStore<TSession>>());
 
         return this;
     }
@@ -86,11 +146,16 @@ public class OpenIddictMongoDbBuilder
     /// <summary>
     /// Configures OpenIddict to use the specified entity as the default token entity.
     /// </summary>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
-    public OpenIddictMongoDbBuilder ReplaceDefaultTokenEntity<TToken>()
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder ReplaceDefaultTokenEntity<
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TToken>()
         where TToken : OpenIddictMongoDbToken
     {
-        Services.Configure<OpenIddictCoreOptions>(options => options.DefaultTokenType = typeof(TToken));
+        Services.Replace(ServiceDescriptor.Scoped<IOpenIddictTokenManager>(static provider =>
+            provider.GetRequiredService<OpenIddictTokenManager<TToken>>()));
+
+        Services.Replace(ServiceDescriptor.Singleton<
+            IOpenIddictTokenStore<TToken>, OpenIddictMongoDbTokenStore<TToken>>());
 
         return this;
     }
@@ -99,13 +164,10 @@ public class OpenIddictMongoDbBuilder
     /// Replaces the default applications collection name (by default, openiddict.applications).
     /// </summary>
     /// <param name="name">The collection name</param>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
     public OpenIddictMongoDbBuilder SetApplicationsCollectionName(string name)
     {
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0261), nameof(name));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(name);
 
         return Configure(options => options.ApplicationsCollectionName = name);
     }
@@ -114,43 +176,58 @@ public class OpenIddictMongoDbBuilder
     /// Replaces the default authorizations collection name (by default, openiddict.authorizations).
     /// </summary>
     /// <param name="name">The collection name</param>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
     public OpenIddictMongoDbBuilder SetAuthorizationsCollectionName(string name)
     {
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0261), nameof(name));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(name);
 
         return Configure(options => options.AuthorizationsCollectionName = name);
+    }
+
+    /// <summary>
+    /// Replaces the default resources collection name (by default, openiddict.resources).
+    /// </summary>
+    /// <param name="name">The collection name</param>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder SetResourcesCollectionName(string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        return Configure(options => options.ResourcesCollectionName = name);
     }
 
     /// <summary>
     /// Replaces the default scopes collection name (by default, openiddict.scopes).
     /// </summary>
     /// <param name="name">The collection name</param>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
     public OpenIddictMongoDbBuilder SetScopesCollectionName(string name)
     {
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0261), nameof(name));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(name);
 
         return Configure(options => options.ScopesCollectionName = name);
+    }
+
+    /// <summary>
+    /// Replaces the default sessions collection name (by default, openiddict.sessions).
+    /// </summary>
+    /// <param name="name">The collection name</param>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
+    public OpenIddictMongoDbBuilder SetSessionsCollectionName(string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        return Configure(options => options.SessionsCollectionName = name);
     }
 
     /// <summary>
     /// Replaces the default tokens collection name (by default, openiddict.tokens).
     /// </summary>
     /// <param name="name">The collection name</param>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
     public OpenIddictMongoDbBuilder SetTokensCollectionName(string name)
     {
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0261), nameof(name));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(name);
 
         return Configure(options => options.TokensCollectionName = name);
     }
@@ -160,20 +237,17 @@ public class OpenIddictMongoDbBuilder
     /// instead of retrieving it from the dependency injection container.
     /// </summary>
     /// <param name="database">The <see cref="IMongoDatabase"/>.</param>
-    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictMongoDbBuilder"/> instance.</returns>
     public OpenIddictMongoDbBuilder UseDatabase(IMongoDatabase database)
     {
-        if (database is null)
-        {
-            throw new ArgumentNullException(nameof(database));
-        }
+        ArgumentNullException.ThrowIfNull(database);
 
         return Configure(options => options.Database = database);
     }
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public override bool Equals(object? obj) => base.Equals(obj);
+    public override bool Equals([NotNullWhen(true)] object? obj) => base.Equals(obj);
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]

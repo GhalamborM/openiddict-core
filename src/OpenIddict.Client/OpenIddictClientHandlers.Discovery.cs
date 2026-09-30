@@ -1,0 +1,1502 @@
+﻿/*
+ * Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+ * See https://github.com/openiddict/openiddict-core for more information concerning
+ * the license and the contributors participating to this project.
+ */
+
+using System.Collections.Immutable;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
+
+namespace OpenIddict.Client;
+
+public static partial class OpenIddictClientHandlers
+{
+    public static class Discovery
+    {
+        public static ImmutableArray<OpenIddictClientHandlerDescriptor> DefaultHandlers { get; } =
+        [
+            /*
+             * Configuration response handling:
+             */
+            ValidateWellKnownConfigurationParameters.Descriptor,
+            HandleConfigurationErrorResponse.Descriptor,
+            ValidateIssuer.Descriptor,
+            ExtractAuthorizationEndpoint.Descriptor,
+            ExtractJsonWebKeySetEndpoint.Descriptor,
+            ExtractDeviceAuthorizationEndpoint.Descriptor,
+            ExtractIntrospectionEndpoint.Descriptor,
+            ExtractEndSessionEndpoint.Descriptor,
+            ExtractMtlsDeviceAuthorizationEndpoint.Descriptor,
+            ExtractMtlsIntrospectionEndpoint.Descriptor,
+            ExtractMtlsPushedAuthorizationEndpoint.Descriptor,
+            ExtractMtlsRevocationEndpoint.Descriptor,
+            ExtractMtlsTokenEndpoint.Descriptor,
+            ExtractMtlsUserInfoEndpoint.Descriptor,
+            ExtractPushedAuthorizationEndpoint.Descriptor,
+            ExtractRevocationEndpoint.Descriptor,
+            ExtractTokenEndpoint.Descriptor,
+            ExtractUserInfoEndpoint.Descriptor,
+            ExtractGrantTypes.Descriptor,
+            ExtractResponseModes.Descriptor,
+            ExtractResponseTypes.Descriptor,
+            ExtractCodeChallengeMethods.Descriptor,
+            ExtractScopes.Descriptor,
+            ExtractIssuerParameterRequirement.Descriptor,
+            ExtractTlsClientCertificateAccessTokenBindingRequirement.Descriptor,
+            ExtractPushedAuthorizationRequirement.Descriptor,
+            ExtractDeviceAuthorizationEndpointClientAuthenticationMethods.Descriptor,
+            ExtractIntrospectionEndpointClientAuthenticationMethods.Descriptor,
+            ExtractPushedAuthorizationEndpointClientAuthenticationMethods.Descriptor,
+            ExtractRevocationEndpointClientAuthenticationMethods.Descriptor,
+            ExtractTokenEndpointClientAuthenticationMethods.Descriptor,
+
+            /*
+             * JSON Web Key Set response handling:
+             */
+            ValidateWellKnownJsonWebKeySetParameters.Descriptor,
+            HandleJsonWebKeySetErrorResponse.Descriptor,
+            ExtractSigningKeys.Descriptor
+        ];
+
+        /// <summary>
+        /// Contains the logic responsible for validating the well-known parameters contained in the configuration response.
+        /// </summary>
+        public sealed class ValidateWellKnownConfigurationParameters : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ValidateWellKnownConfigurationParameters>()
+                    .SetOrder(int.MinValue + 100_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                foreach (var parameter in context.Response.GetParameters())
+                {
+                    if (!ValidateParameterType(parameter.Key, parameter.Value))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2107(parameter.Key),
+                            uri: SR.FormatID8000(SR.ID2107));
+
+                        return ValueTask.CompletedTask;
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+
+                // Note: in the typical case, the response parameters should be deserialized from a
+                // JSON response and thus natively stored as System.Text.Json.JsonElement instances.
+                //
+                // In the rare cases where the underlying value wouldn't be a JsonElement instance
+                // (e.g when custom parameters are manually added to the response), the static
+                // conversion operator would take care of converting the underlying value to a
+                // JsonElement instance using the same value type as the original parameter value.
+                static bool ValidateParameterType(string name, OpenIddictParameter value) => name switch
+                {
+                    // Error parameters MUST be formatted as unique strings:
+                    Parameters.Error or Parameters.ErrorDescription or Parameters.ErrorUri
+                        => ((JsonElement) value).ValueKind is JsonValueKind.String,
+
+                    // The following parameters MUST be formatted as unique strings:
+                    Metadata.AuthorizationEndpoint              or
+                    Metadata.DeviceAuthorizationEndpoint        or
+                    Metadata.EndSessionEndpoint                 or
+                    Metadata.Issuer                             or
+                    Metadata.JwksUri                            or
+                    Metadata.PushedAuthorizationRequestEndpoint or
+                    Metadata.TokenEndpoint                      or
+                    Metadata.UserInfoEndpoint
+                        => ((JsonElement) value).ValueKind is JsonValueKind.String,
+
+                    // The following parameters MUST be formatted as arrays of strings:
+                    Metadata.CodeChallengeMethodsSupported                          or
+                    Metadata.DeviceAuthorizationEndpointAuthMethodsSupported        or
+                    Metadata.GrantTypesSupported                                    or
+                    Metadata.PushedAuthorizationRequestEndpointAuthMethodsSupported or
+                    Metadata.ResponseModesSupported                                 or
+                    Metadata.ResponseTypesSupported                                 or
+                    Metadata.ScopesSupported                                        or
+                    Metadata.TokenEndpointAuthMethodsSupported
+                        => ((JsonElement) value) is JsonElement element &&
+                            element.ValueKind is JsonValueKind.Array &&
+                            OpenIddictHelpers.ValidateArrayElements(element, JsonValueKind.String),
+
+                    // The following parameters MUST be formatted as JSON objects and only contain string values:
+                    Metadata.MtlsEndpointAliases
+                        => ((JsonElement) value) is JsonElement element &&
+                            element.ValueKind is JsonValueKind.Object &&
+                            OpenIddictHelpers.ValidateObjectElements(element, JsonValueKind.String),
+
+                    // The following parameters MUST be formatted as booleans:
+                    Metadata.AuthorizationResponseIssParameterSupported or
+                    Metadata.RequirePushedAuthorizationRequests         or
+                    Metadata.TlsClientCertificateBoundAccessTokens
+                        => ((JsonElement) value).ValueKind is JsonValueKind.True or JsonValueKind.False,
+
+                    // Parameters that are not in the well-known list can be of any type.
+                    _ => true
+                };
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for surfacing potential errors from the configuration response.
+        /// </summary>
+        public sealed class HandleConfigurationErrorResponse : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<HandleConfigurationErrorResponse>()
+                    .SetOrder(ValidateWellKnownConfigurationParameters.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: the specification doesn't define a standard way to return an error other than
+                // returning a 4xx status code. That said, some implementations are known to return
+                // JSON payloads similar to standard errored token responses. For more information, see
+                // https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfigurationResponse.
+                if (!string.IsNullOrEmpty(context.Response.Error))
+                {
+                    context.Logger.LogInformation(6203, SR.GetResourceString(SR.ID6203), context.Response);
+
+                    context.Reject(
+                        error: Errors.ServerError,
+                        description: SR.GetResourceString(SR.ID2144),
+                        uri: SR.FormatID8000(SR.ID2144));
+
+                    return ValueTask.CompletedTask;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the issuer from the discovery document.
+        /// </summary>
+        public sealed class ValidateIssuer : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ValidateIssuer>()
+                    .SetOrder(HandleConfigurationErrorResponse.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: the issuer returned in the discovery document must exactly match the URI used to access it.
+                // See https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfigurationValidation.
+
+                var issuer = (string?) context.Response[Metadata.Issuer];
+                if (string.IsNullOrEmpty(issuer))
+                {
+                    context.Reject(
+                        error: Errors.ServerError,
+                        description: SR.GetResourceString(SR.ID2096),
+                        uri: SR.FormatID8000(SR.ID2096));
+
+                    return ValueTask.CompletedTask;
+                }
+
+                if (!Uri.TryCreate(issuer, UriKind.Absolute, out Uri? uri))
+                {
+                    context.Reject(
+                        error: Errors.ServerError,
+                        description: SR.GetResourceString(SR.ID2097),
+                        uri: SR.FormatID8000(SR.ID2097));
+
+                    return ValueTask.CompletedTask;
+                }
+
+                // Ensure the issuer matches the expected value.
+                if (uri != context.Registration.Issuer)
+                {
+                    context.Reject(
+                        error: Errors.ServerError,
+                        description: SR.GetResourceString(SR.ID2165),
+                        uri: SR.FormatID8000(SR.ID2165));
+
+                    return ValueTask.CompletedTask;
+                }
+
+                context.Configuration.Issuer = uri;
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the authorization endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractAuthorizationEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractAuthorizationEndpoint>()
+                    .SetOrder(ValidateIssuer.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: the authorization_endpoint node is required by the OpenID Connect discovery specification
+                // but is optional in the OAuth 2.0 authorization server metadata specification. To make OpenIddict
+                // compatible with the newer OAuth 2.0 specification, null/empty and missing values are allowed here.
+                //
+                // Handlers that require a non-null authorization endpoint URI are expected to return an error
+                // if the authorization endpoint URI couldn't be resolved from the authorization server metadata.
+                // See https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfigurationClient
+                // and https://datatracker.ietf.org/doc/html/rfc8414#section-2 for more information.
+                //
+                var endpoint = (string?) context.Response[Metadata.AuthorizationEndpoint];
+                if (!string.IsNullOrEmpty(endpoint))
+                {
+                    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2100(Metadata.AuthorizationEndpoint),
+                            uri: SR.FormatID8000(SR.ID2100));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    context.Configuration.AuthorizationEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the JSON Web Key Set endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractJsonWebKeySetEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractJsonWebKeySetEndpoint>()
+                    .SetOrder(ExtractAuthorizationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: the jwks_uri node is required by the OpenID Connect discovery specification.
+                // See https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfigurationClient.
+                var endpoint = (string?) context.Response[Metadata.JwksUri];
+                if (string.IsNullOrEmpty(endpoint))
+                {
+                    context.Reject(
+                        error: Errors.ServerError,
+                        description: SR.GetResourceString(SR.ID2099),
+                        uri: SR.FormatID8000(SR.ID2099));
+
+                    return ValueTask.CompletedTask;
+                }
+
+                if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                {
+                    context.Reject(
+                        error: Errors.ServerError,
+                        description: SR.FormatID2100(Metadata.JwksUri),
+                        uri: SR.FormatID8000(SR.ID2100));
+
+                    return ValueTask.CompletedTask;
+                }
+
+                context.Configuration.JsonWebKeySetUri = uri;
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the device authorization endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractDeviceAuthorizationEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractDeviceAuthorizationEndpoint>()
+                    .SetOrder(ExtractJsonWebKeySetEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                var endpoint = (string?) context.Response[Metadata.DeviceAuthorizationEndpoint];
+                if (!string.IsNullOrEmpty(endpoint))
+                {
+                    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2100(Metadata.DeviceAuthorizationEndpoint),
+                            uri: SR.FormatID8000(SR.ID2100));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    context.Configuration.DeviceAuthorizationEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the introspection endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractIntrospectionEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractIntrospectionEndpoint>()
+                    .SetOrder(ExtractDeviceAuthorizationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                var endpoint = (string?) context.Response[Metadata.IntrospectionEndpoint];
+                if (!string.IsNullOrEmpty(endpoint))
+                {
+                    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2100(Metadata.IntrospectionEndpoint),
+                            uri: SR.FormatID8000(SR.ID2100));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    context.Configuration.IntrospectionEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the end session endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractEndSessionEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractEndSessionEndpoint>()
+                    .SetOrder(ExtractIntrospectionEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                var endpoint = (string?) context.Response[Metadata.EndSessionEndpoint];
+                if (!string.IsNullOrEmpty(endpoint))
+                {
+                    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2100(Metadata.EndSessionEndpoint),
+                            uri: SR.FormatID8000(SR.ID2100));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    context.Configuration.EndSessionEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the mTLS-enabled
+        /// device authorization endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractMtlsDeviceAuthorizationEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractMtlsDeviceAuthorizationEndpoint>()
+                    .SetOrder(ExtractEndSessionEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: as recommended by the specification, values present in the "mtls_endpoint_aliases" node
+                // that can't be recognized as OAuth 2.0 endpoints or are not valid URIs are simply ignored.
+                var endpoint = (string?) context.Response[Metadata.MtlsEndpointAliases]?[Metadata.DeviceAuthorizationEndpoint];
+                if (Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) && !OpenIddictHelpers.IsImplicitFileUri(uri))
+                {
+                    context.Configuration.MtlsDeviceAuthorizationEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the mTLS-enabled
+        /// introspection endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractMtlsIntrospectionEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractMtlsIntrospectionEndpoint>()
+                    .SetOrder(ExtractMtlsDeviceAuthorizationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: as recommended by the specification, values present in the "mtls_endpoint_aliases" node
+                // that can't be recognized as OAuth 2.0 endpoints or are not valid URIs are simply ignored.
+                var endpoint = (string?) context.Response[Metadata.MtlsEndpointAliases]?[Metadata.IntrospectionEndpoint];
+                if (Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) && !OpenIddictHelpers.IsImplicitFileUri(uri))
+                {
+                    context.Configuration.MtlsIntrospectionEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the mTLS-enabled pushed authorization endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractMtlsPushedAuthorizationEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractMtlsPushedAuthorizationEndpoint>()
+                    .SetOrder(ExtractMtlsIntrospectionEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: as recommended by the specification, values present in the "mtls_endpoint_aliases" node
+                // that can't be recognized as OAuth 2.0 endpoints or are not valid URIs are simply ignored.
+                var endpoint = (string?) context.Response[Metadata.MtlsEndpointAliases]?[Metadata.PushedAuthorizationRequestEndpoint];
+                if (Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) && !OpenIddictHelpers.IsImplicitFileUri(uri))
+                {
+                    context.Configuration.MtlsPushedAuthorizationEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the mTLS-enabled
+        /// revocation endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractMtlsRevocationEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractMtlsRevocationEndpoint>()
+                    .SetOrder(ExtractMtlsPushedAuthorizationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: as recommended by the specification, values present in the "mtls_endpoint_aliases" node
+                // that can't be recognized as OAuth 2.0 endpoints or are not valid URIs are simply ignored.
+                var endpoint = (string?) context.Response[Metadata.MtlsEndpointAliases]?[Metadata.RevocationEndpoint];
+                if (Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) && !OpenIddictHelpers.IsImplicitFileUri(uri))
+                {
+                    context.Configuration.MtlsRevocationEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the mTLS-enabled
+        /// token endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractMtlsTokenEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractMtlsTokenEndpoint>()
+                    .SetOrder(ExtractMtlsRevocationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: as recommended by the specification, values present in the "mtls_endpoint_aliases" node
+                // that can't be recognized as OAuth 2.0 endpoints or are not valid URIs are simply ignored.
+                var endpoint = (string?) context.Response[Metadata.MtlsEndpointAliases]?[Metadata.TokenEndpoint];
+                if (Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) && !OpenIddictHelpers.IsImplicitFileUri(uri))
+                {
+                    context.Configuration.MtlsTokenEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the mTLS-enabled
+        /// userinfo endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractMtlsUserInfoEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractMtlsUserInfoEndpoint>()
+                    .SetOrder(ExtractMtlsTokenEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: as recommended by the specification, values present in the "mtls_endpoint_aliases" node
+                // that can't be recognized as OAuth 2.0 endpoints or are not valid URIs are simply ignored.
+                var endpoint = (string?) context.Response[Metadata.MtlsEndpointAliases]?[Metadata.UserInfoEndpoint];
+                if (Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) && !OpenIddictHelpers.IsImplicitFileUri(uri))
+                {
+                    context.Configuration.MtlsUserInfoEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the pushed authorization endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractPushedAuthorizationEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractPushedAuthorizationEndpoint>()
+                    .SetOrder(ExtractEndSessionEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                var endpoint = (string?) context.Response[Metadata.PushedAuthorizationRequestEndpoint];
+                if (!string.IsNullOrEmpty(endpoint))
+                {
+                    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2100(Metadata.PushedAuthorizationRequestEndpoint),
+                            uri: SR.FormatID8000(SR.ID2100));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    context.Configuration.PushedAuthorizationEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the revocation endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractRevocationEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractRevocationEndpoint>()
+                    .SetOrder(ExtractPushedAuthorizationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                var endpoint = (string?) context.Response[Metadata.RevocationEndpoint];
+                if (!string.IsNullOrEmpty(endpoint))
+                {
+                    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2100(Metadata.RevocationEndpoint),
+                            uri: SR.FormatID8000(SR.ID2100));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    context.Configuration.RevocationEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the token endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractTokenEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractTokenEndpoint>()
+                    .SetOrder(ExtractRevocationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                var endpoint = (string?) context.Response[Metadata.TokenEndpoint];
+                if (!string.IsNullOrEmpty(endpoint))
+                {
+                    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2100(Metadata.TokenEndpoint),
+                            uri: SR.FormatID8000(SR.ID2100));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    context.Configuration.TokenEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the userinfo endpoint URI from the discovery document.
+        /// </summary>
+        public sealed class ExtractUserInfoEndpoint : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractUserInfoEndpoint>()
+                    .SetOrder(ExtractTokenEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                var endpoint = (string?) context.Response[Metadata.UserInfoEndpoint];
+                if (!string.IsNullOrEmpty(endpoint))
+                {
+                    if (!Uri.TryCreate(endpoint, UriKind.Absolute, out Uri? uri) || OpenIddictHelpers.IsImplicitFileUri(uri))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2100(Metadata.UserInfoEndpoint),
+                            uri: SR.FormatID8000(SR.ID2100));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    context.Configuration.UserInfoEndpoint = uri;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the supported grant types from the discovery document.
+        /// </summary>
+        public sealed class ExtractGrantTypes : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractGrantTypes>()
+                    .SetOrder(ExtractAuthorizationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the grant types supported by the authorization endpoint, if available.
+                foreach (var type in (ImmutableArray<string?>?) context.Response[Metadata.GrantTypesSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(type))
+                    {
+                        context.Configuration.GrantTypesSupported.Add(type);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the supported response types from the discovery document.
+        /// </summary>
+        public sealed class ExtractResponseModes : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractResponseModes>()
+                    .SetOrder(ExtractAuthorizationEndpoint.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the response modes supported by the authorization endpoint, if available.
+                foreach (var mode in (ImmutableArray<string?>?) context.Response[Metadata.ResponseModesSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(mode))
+                    {
+                        context.Configuration.ResponseModesSupported.Add(mode);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the supported response types from the discovery document.
+        /// </summary>
+        public sealed class ExtractResponseTypes : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractResponseTypes>()
+                    .SetOrder(ExtractResponseModes.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the response types supported by the authorization endpoint, if available.
+                foreach (var type in (ImmutableArray<string?>?) context.Response[Metadata.ResponseTypesSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(type))
+                    {
+                        context.Configuration.ResponseTypesSupported.Add(type);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the supported code challenge methods from the discovery document.
+        /// </summary>
+        public sealed class ExtractCodeChallengeMethods : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractCodeChallengeMethods>()
+                    .SetOrder(ExtractResponseTypes.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the code challenge methods supported by the authorization endpoint, if available.
+                foreach (var method in (ImmutableArray<string?>?) context.Response[Metadata.CodeChallengeMethodsSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(method))
+                    {
+                        context.Configuration.CodeChallengeMethodsSupported.Add(method);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the supported scopes from the discovery document.
+        /// </summary>
+        public sealed class ExtractScopes : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractScopes>()
+                    .SetOrder(ExtractCodeChallengeMethods.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the scopes supported by the remote server, if available.
+                foreach (var scope in (ImmutableArray<string?>?) context.Response[Metadata.ScopesSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(scope))
+                    {
+                        context.Configuration.ScopesSupported.Add(scope);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the flag indicating
+        /// whether the "iss" parameter is supported from the discovery document.
+        /// </summary>
+        public sealed class ExtractIssuerParameterRequirement : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractIssuerParameterRequirement>()
+                    .SetOrder(ExtractScopes.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                context.Configuration.AuthorizationResponseIssParameterSupported = (bool?)
+                    context.Response[Metadata.AuthorizationResponseIssParameterSupported];
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the flag indicating whether client
+        /// certificate-bound access tokens are supported from the discovery document.
+        /// </summary>
+        public sealed class ExtractTlsClientCertificateAccessTokenBindingRequirement : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractTlsClientCertificateAccessTokenBindingRequirement>()
+                    .SetOrder(ExtractIssuerParameterRequirement.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                context.Configuration.TlsClientCertificateBoundAccessTokens = (bool?)
+                    context.Response[Metadata.TlsClientCertificateBoundAccessTokens];
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the flag indicating whether pushed
+        /// authorization requests (PAR) are considered mandatory from the discovery document.
+        /// </summary>
+        public sealed class ExtractPushedAuthorizationRequirement : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractPushedAuthorizationRequirement>()
+                    .SetOrder(ExtractTlsClientCertificateAccessTokenBindingRequirement.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                context.Configuration.RequirePushedAuthorizationRequests = (bool?)
+                    context.Response[Metadata.RequirePushedAuthorizationRequests];
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the authentication methods
+        /// supported by the device authorization endpoint from the discovery document.
+        /// </summary>
+        public sealed class ExtractDeviceAuthorizationEndpointClientAuthenticationMethods : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractDeviceAuthorizationEndpointClientAuthenticationMethods>()
+                    .SetOrder(ExtractPushedAuthorizationRequirement.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the client authentication methods supported by the device authorization endpoint, if available.
+                //
+                // Note: "device_authorization_endpoint_auth_methods_supported" is not a standard parameter
+                // but is supported by OpenIddict 4.3.0 and higher for consistency with the other endpoints.
+                foreach (var method in (ImmutableArray<string?>?) context.Response[Metadata.DeviceAuthorizationEndpointAuthMethodsSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(method))
+                    {
+                        context.Configuration.DeviceAuthorizationEndpointAuthMethodsSupported.Add(method);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the authentication methods
+        /// supported by the introspection endpoint from the discovery document.
+        /// </summary>
+        public sealed class ExtractIntrospectionEndpointClientAuthenticationMethods : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractIntrospectionEndpointClientAuthenticationMethods>()
+                    .SetOrder(ExtractDeviceAuthorizationEndpointClientAuthenticationMethods.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the client authentication methods supported by the introspection endpoint, if available.
+                foreach (var method in (ImmutableArray<string?>?) context.Response[Metadata.IntrospectionEndpointAuthMethodsSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(method))
+                    {
+                        context.Configuration.IntrospectionEndpointAuthMethodsSupported.Add(method);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the authentication methods
+        /// supported by the pushed authorization endpoint from the discovery document.
+        /// </summary>
+        public sealed class ExtractPushedAuthorizationEndpointClientAuthenticationMethods : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractPushedAuthorizationEndpointClientAuthenticationMethods>()
+                    .SetOrder(ExtractTlsClientCertificateAccessTokenBindingRequirement.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the client authentication methods supported by the pushed authorization endpoint, if available.
+                //
+                // Note: "pushed_authorization_request_endpoint_auth_methods_supported" is not a standard parameter
+                // but is supported by OpenIddict 6.1.0 and higher for consistency with the other endpoints.
+                foreach (var method in (ImmutableArray<string?>?) context.Response[Metadata.PushedAuthorizationRequestEndpointAuthMethodsSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(method))
+                    {
+                        context.Configuration.PushedAuthorizationEndpointAuthMethodsSupported.Add(method);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the authentication methods
+        /// supported by the revocation endpoint from the discovery document.
+        /// </summary>
+        public sealed class ExtractRevocationEndpointClientAuthenticationMethods : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractRevocationEndpointClientAuthenticationMethods>()
+                    .SetOrder(ExtractPushedAuthorizationEndpointClientAuthenticationMethods.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the client authentication methods supported by the revocation endpoint, if available.
+                foreach (var method in (ImmutableArray<string?>?) context.Response[Metadata.RevocationEndpointAuthMethodsSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(method))
+                    {
+                        context.Configuration.RevocationEndpointAuthMethodsSupported.Add(method);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the authentication methods
+        /// supported by the token endpoint from the discovery document.
+        /// </summary>
+        public sealed class ExtractTokenEndpointClientAuthenticationMethods : IOpenIddictClientHandler<HandleConfigurationResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleConfigurationResponseContext>()
+                    .UseSingletonHandler<ExtractTokenEndpointClientAuthenticationMethods>()
+                    .SetOrder(ExtractRevocationEndpointClientAuthenticationMethods.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleConfigurationResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Resolve the client authentication methods supported by the token endpoint, if available.
+                foreach (var method in (ImmutableArray<string?>?) context.Response[Metadata.TokenEndpointAuthMethodsSupported] ?? [])
+                {
+                    if (!string.IsNullOrEmpty(method))
+                    {
+                        context.Configuration.TokenEndpointAuthMethodsSupported.Add(method);
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for validating the well-known parameters contained in the JSON Web Key Set response.
+        /// </summary>
+        public sealed class ValidateWellKnownJsonWebKeySetParameters : IOpenIddictClientHandler<HandleJsonWebKeySetResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleJsonWebKeySetResponseContext>()
+                    .UseSingletonHandler<ValidateWellKnownJsonWebKeySetParameters>()
+                    .SetOrder(int.MinValue + 100_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleJsonWebKeySetResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                foreach (var parameter in context.Response.GetParameters())
+                {
+                    if (!ValidateParameterType(parameter.Key, parameter.Value))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.FormatID2107(parameter.Key),
+                            uri: SR.FormatID8000(SR.ID2107));
+
+                        return ValueTask.CompletedTask;
+                    }
+                }
+
+                return ValueTask.CompletedTask;
+
+                // Note: in the typical case, the response parameters should be deserialized from a
+                // JSON response and thus natively stored as System.Text.Json.JsonElement instances.
+                //
+                // In the rare cases where the underlying value wouldn't be a JsonElement instance
+                // (e.g when custom parameters are manually added to the response), the static
+                // conversion operator would take care of converting the underlying value to a
+                // JsonElement instance using the same value type as the original parameter value.
+                static bool ValidateParameterType(string name, OpenIddictParameter value) => name switch
+                {
+                    // Error parameters MUST be formatted as unique strings:
+                    Parameters.Error or Parameters.ErrorDescription or Parameters.ErrorUri
+                        => ((JsonElement) value).ValueKind is JsonValueKind.String,
+
+                    // The following parameters MUST be formatted as arrays of objects:
+                    JsonWebKeySetParameterNames.Keys => ((JsonElement) value) is JsonElement element &&
+                        element.ValueKind is JsonValueKind.Array &&
+                        OpenIddictHelpers.ValidateArrayElements(element, JsonValueKind.Object),
+
+                    // Parameters that are not in the well-known list can be of any type.
+                    _ => true
+                };
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for surfacing potential errors from the JSON Web Key Set response.
+        /// </summary>
+        public sealed class HandleJsonWebKeySetErrorResponse : IOpenIddictClientHandler<HandleJsonWebKeySetResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleJsonWebKeySetResponseContext>()
+                    .UseSingletonHandler<HandleJsonWebKeySetErrorResponse>()
+                    .SetOrder(ValidateWellKnownJsonWebKeySetParameters.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleJsonWebKeySetResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                // Note: the specification doesn't define a standard way to return an error other than
+                // returning a 4xx status code. That said, some implementations are known to return
+                // JSON payloads similar to standard errored token responses. For more information, see
+                // https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfigurationResponse.
+                if (!string.IsNullOrEmpty(context.Response.Error))
+                {
+                    context.Logger.LogInformation(6204, SR.GetResourceString(SR.ID6204), context.Response);
+
+                    context.Reject(
+                        error: Errors.ServerError,
+                        description: SR.GetResourceString(SR.ID2145),
+                        uri: SR.FormatID8000(SR.ID2145));
+
+                    return ValueTask.CompletedTask;
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+
+        /// <summary>
+        /// Contains the logic responsible for extracting the signing keys from the JSON Web Key Set document.
+        /// </summary>
+        public sealed class ExtractSigningKeys : IOpenIddictClientHandler<HandleJsonWebKeySetResponseContext>
+        {
+            /// <summary>
+            /// Gets the default descriptor definition assigned to this handler.
+            /// </summary>
+            public static OpenIddictClientHandlerDescriptor Descriptor { get; }
+                = OpenIddictClientHandlerDescriptor.CreateBuilder<HandleJsonWebKeySetResponseContext>()
+                    .UseSingletonHandler<ExtractSigningKeys>()
+                    .SetOrder(HandleJsonWebKeySetErrorResponse.Descriptor.Order + 1_000)
+                    .SetType(OpenIddictClientHandlerType.BuiltIn)
+                    .Build();
+
+            /// <inheritdoc/>
+            public ValueTask HandleAsync(HandleJsonWebKeySetResponseContext context)
+            {
+                ArgumentNullException.ThrowIfNull(context);
+
+                var keys = context.Response[JsonWebKeySetParameterNames.Keys]?.GetUnnamedParameters();
+                if (keys is not { Count: > 0 })
+                {
+                    context.Reject(
+                        error: Errors.ServerError,
+                        description: SR.FormatID2102(JsonWebKeySetParameterNames.Keys),
+                        uri: SR.FormatID8000(SR.ID2102));
+
+                    return ValueTask.CompletedTask;
+                }
+
+                for (var index = 0; index < keys.Count; index++)
+                {
+                    // Note: the "use" parameter is defined as optional by the JSON Web Key Set specification
+                    // but is required by the OpenID Connect discovery specification if both signing
+                    // and encryption keys are present in the returned list. If the "use" parameter
+                    // is not explicitly specified or has an empty value, assume it is a signing key.
+                    //
+                    // For more information, see https://www.rfc-editor.org/rfc/rfc7517#section-4.2
+                    // and https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata.
+                    var use = (string?) keys[index][JsonWebKeyParameterNames.Use];
+                    if (string.IsNullOrEmpty(use))
+                    {
+                        use = JsonWebKeyUseNames.Sig;
+                    }
+
+                    // Ignore security keys that are not used for signing.
+                    if (!string.Equals(use, JsonWebKeyUseNames.Sig, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var key = (string?) keys[index][JsonWebKeyParameterNames.Kty] switch
+                    {
+                        JsonWebAlgorithmsKeyTypes.Akp => new JsonWebKey
+                        {
+                            Kty = JsonWebAlgorithmsKeyTypes.Akp,
+                            Alg = (string?) keys[index][JsonWebKeyParameterNames.Alg],
+                            Pub = (string?) keys[index][JsonWebKeyParameterNames.Pub]
+                        },
+
+                        JsonWebAlgorithmsKeyTypes.EllipticCurve => new JsonWebKey
+                        {
+                            Kty = JsonWebAlgorithmsKeyTypes.EllipticCurve,
+                            Crv = (string?) keys[index][JsonWebKeyParameterNames.Crv],
+                            X = (string?) keys[index][JsonWebKeyParameterNames.X],
+                            Y = (string?) keys[index][JsonWebKeyParameterNames.Y]
+                        },
+
+                        JsonWebAlgorithmsKeyTypes.RSA => new JsonWebKey
+                        {
+                            Kty = JsonWebAlgorithmsKeyTypes.RSA,
+                            E = (string?) keys[index][JsonWebKeyParameterNames.E],
+                            N = (string?) keys[index][JsonWebKeyParameterNames.N]
+                        },
+
+                        _ => null
+                    };
+
+                    if (key is null)
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.GetResourceString(SR.ID2103),
+                            uri: SR.FormatID8000(SR.ID2103));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    // If the key is an AKP key, ensure the mandatory parameters are all present.
+                    if (string.Equals(key.Kty, JsonWebAlgorithmsKeyTypes.Akp, StringComparison.Ordinal) &&
+                       (string.IsNullOrEmpty(key.Alg) || string.IsNullOrEmpty(key.Pub)))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.GetResourceString(SR.ID2104),
+                            uri: SR.FormatID8000(SR.ID2104));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    // If the key is an EC key, ensure the mandatory parameters are all present.
+                    if (string.Equals(key.Kty, JsonWebAlgorithmsKeyTypes.EllipticCurve, StringComparison.Ordinal) &&
+                       (string.IsNullOrEmpty(key.Crv) || string.IsNullOrEmpty(key.X) || string.IsNullOrEmpty(key.Y)))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.GetResourceString(SR.ID2104),
+                            uri: SR.FormatID8000(SR.ID2104));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    // If the key is a RSA key, ensure the mandatory parameters are all present.
+                    if (string.Equals(key.Kty, JsonWebAlgorithmsKeyTypes.RSA, StringComparison.Ordinal) &&
+                       (string.IsNullOrEmpty(key.E) || string.IsNullOrEmpty(key.N)))
+                    {
+                        context.Reject(
+                            error: Errors.ServerError,
+                            description: SR.GetResourceString(SR.ID2104),
+                            uri: SR.FormatID8000(SR.ID2104));
+
+                        return ValueTask.CompletedTask;
+                    }
+
+                    key.KeyId = (string?) keys[index][JsonWebKeyParameterNames.Kid];
+                    key.X5t = (string?) keys[index][JsonWebKeyParameterNames.X5t];
+                    key.X5tS256 = (string?) keys[index][JsonWebKeyParameterNames.X5tS256];
+
+                    if (keys[index].TryGetNamedParameter(JsonWebKeyParameterNames.X5c, out var chain))
+                    {
+                        foreach (string? certificate in chain.GetUnnamedParameters())
+                        {
+                            if (string.IsNullOrEmpty(certificate))
+                            {
+                                continue;
+                            }
+
+                            key.X5c.Add(certificate);
+                        }
+                    }
+
+                    context.JsonWebKeySet.Keys.Add(key);
+                }
+
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+}

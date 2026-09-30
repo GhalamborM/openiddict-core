@@ -12,82 +12,226 @@ namespace OpenIddict.Validation;
 public static class OpenIddictValidationHandlerFilters
 {
     /// <summary>
-    /// Represents a filter that excludes the associated handlers if no access token is validated.
+    /// Represents a filter that excludes the associated handlers if no access token is extracted.
     /// </summary>
-    public class RequireAccessTokenValidated : IOpenIddictValidationHandlerFilter<ProcessAuthenticationContext>
+    public sealed class RequireAccessTokenExtracted : IOpenIddictValidationHandlerFilter<ProcessAuthenticationContext>
     {
+        /// <inheritdoc/>
         public ValueTask<bool> IsActiveAsync(ProcessAuthenticationContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
-            return new ValueTask<bool>(context.ValidateAccessToken);
+            return new(context.ExtractAccessToken);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no access token is validated.
+    /// </summary>
+    public sealed class RequireAccessTokenValidated : IOpenIddictValidationHandlerFilter<ProcessAuthenticationContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ProcessAuthenticationContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(context.ValidateAccessToken);
         }
     }
 
     /// <summary>
     /// Represents a filter that excludes the associated handlers if authorization validation was not enabled.
     /// </summary>
-    public class RequireAuthorizationEntryValidationEnabled : IOpenIddictValidationHandlerFilter<BaseContext>
+    public sealed class RequireAuthorizationEntryValidationEnabled : IOpenIddictValidationHandlerFilter<BaseContext>
     {
+        /// <inheritdoc/>
         public ValueTask<bool> IsActiveAsync(BaseContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
-            return new ValueTask<bool>(context.Options.EnableAuthorizationEntryValidation);
+            return new(context.Options.EnableAuthorizationEntryValidation);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no authorization identifier is resolved from the token.
+    /// </summary>
+    public sealed class RequireAuthorizationIdResolved : IOpenIddictValidationHandlerFilter<ValidateTokenContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ValidateTokenContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(!string.IsNullOrEmpty(context.AuthorizationId));
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no client assertion is generated.
+    /// </summary>
+    public sealed class RequireClientAssertionGenerated : IOpenIddictValidationHandlerFilter<ProcessAuthenticationContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ProcessAuthenticationContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(context.GenerateClientAssertion);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no introspection request is expected to be sent.
+    /// </summary>
+    public sealed class RequireIntrospectionRequest : IOpenIddictValidationHandlerFilter<ProcessAuthenticationContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ProcessAuthenticationContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(context.SendIntrospectionRequest);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if the selected token format is not JSON Web Token.
+    /// </summary>
+    public sealed class RequireJsonWebTokenFormat : IOpenIddictValidationHandlerFilter<GenerateTokenContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(GenerateTokenContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(context.TokenFormat is TokenFormats.Private.JsonWebToken);
         }
     }
 
     /// <summary>
     /// Represents a filter that excludes the associated handlers if local validation is not used.
     /// </summary>
-    public class RequireLocalValidation : IOpenIddictValidationHandlerFilter<BaseContext>
+    public sealed class RequireLocalValidation : IOpenIddictValidationHandlerFilter<BaseContext>
     {
+        /// <inheritdoc/>
         public ValueTask<bool> IsActiveAsync(BaseContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
-            return new ValueTask<bool>(context.Options.ValidationType == OpenIddictValidationType.Direct);
+            return new(context.Options.ValidationType is OpenIddictValidationType.Direct);
         }
     }
 
     /// <summary>
-    /// Represents a filter that excludes the associated handlers if introspection is not used.
+    /// Represents a filter that excludes the associated handlers if session validation was not enabled.
     /// </summary>
-    public class RequireIntrospectionValidation : IOpenIddictValidationHandlerFilter<BaseContext>
+    public sealed class RequireSessionEntryValidationEnabled : IOpenIddictValidationHandlerFilter<BaseContext>
     {
+        /// <inheritdoc/>
         public ValueTask<bool> IsActiveAsync(BaseContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
-            return new ValueTask<bool>(context.Options.ValidationType == OpenIddictValidationType.Introspection);
+            return new(context.Options.EnableSessionEntryValidation);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no session identifier is resolved from the token.
+    /// </summary>
+    public sealed class RequireSessionIdResolved : IOpenIddictValidationHandlerFilter<ValidateTokenContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ValidateTokenContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(!string.IsNullOrEmpty(context.SessionId));
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if token audience validation was disabled.
+    /// </summary>
+    public sealed class RequireTokenAudienceValidationEnabled : IOpenIddictValidationHandlerFilter<ValidateTokenContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ValidateTokenContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(!context.DisableAudienceValidation);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if no token identifier is resolved from the token.
+    /// </summary>
+    public sealed class RequireTokenIdResolved : IOpenIddictValidationHandlerFilter<ValidateTokenContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ValidateTokenContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(!string.IsNullOrEmpty(context.TokenId));
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if token lifetime validation was disabled.
+    /// </summary>
+    public sealed class RequireTokenLifetimeValidationEnabled : IOpenIddictValidationHandlerFilter<ValidateTokenContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ValidateTokenContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(!context.DisableLifetimeValidation);
         }
     }
 
     /// <summary>
     /// Represents a filter that excludes the associated handlers if token validation was not enabled.
     /// </summary>
-    public class RequireTokenEntryValidationEnabled : IOpenIddictValidationHandlerFilter<BaseContext>
+    public sealed class RequireTokenEntryValidationEnabled : IOpenIddictValidationHandlerFilter<BaseContext>
     {
+        /// <inheritdoc/>
         public ValueTask<bool> IsActiveAsync(BaseContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
-            return new ValueTask<bool>(context.Options.EnableTokenEntryValidation);
+            return new(context.Options.EnableTokenEntryValidation);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if token presenter validation was disabled.
+    /// </summary>
+    public sealed class RequireTokenPresenterValidationEnabled : IOpenIddictValidationHandlerFilter<ValidateTokenContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ValidateTokenContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(!context.DisablePresenterValidation);
+        }
+    }
+
+    /// <summary>
+    /// Represents a filter that excludes the associated handlers if token proof-of-possession validation was disabled.
+    /// </summary>
+    public sealed class RequireTokenProofOfPossessionValidationEnabled : IOpenIddictValidationHandlerFilter<ValidateTokenContext>
+    {
+        /// <inheritdoc/>
+        public ValueTask<bool> IsActiveAsync(ValidateTokenContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            return new(!context.DisableProofOfPossessionValidation);
         }
     }
 }

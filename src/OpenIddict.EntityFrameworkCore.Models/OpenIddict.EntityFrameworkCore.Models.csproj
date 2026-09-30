@@ -1,7 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>$(NetCoreTargetFrameworks)</TargetFrameworks>
+    <IncludeInternalExtensions>false</IncludeInternalExtensions>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -10,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Using Remove="System.Net.Http" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" />
   </ItemGroup>
 
 </Project>

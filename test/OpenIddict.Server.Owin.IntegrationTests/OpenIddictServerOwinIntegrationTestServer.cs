@@ -4,7 +4,6 @@
  * the license and the contributors participating to this project.
  */
 
-using System.Diagnostics.CodeAnalysis;
 using Microsoft.Owin.Testing;
 using OpenIddict.Server.IntegrationTests;
 
@@ -23,17 +22,14 @@ public class OpenIddictServerOwinIntegrationTestServer : OpenIddictServerIntegra
     /// </summary>
     public TestServer Server { get; }
 
-    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope",
-        Justification = "The caller is responsible of disposing the test client.")]
     public override ValueTask<OpenIddictServerIntegrationTestClient> CreateClientAsync()
-        => new ValueTask<OpenIddictServerIntegrationTestClient>(
-            new OpenIddictServerIntegrationTestClient(Server.HttpClient));
+        => new(new OpenIddictServerIntegrationTestClient(Server.HttpClient));
 
     public override ValueTask DisposeAsync()
     {
         // Dispose of the underlying test server.
         Server.Dispose();
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 }

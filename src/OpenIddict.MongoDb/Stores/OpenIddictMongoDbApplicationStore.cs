@@ -5,29 +5,46 @@
  */
 
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using OpenIddict.MongoDb.Models;
+using static OpenIddict.Abstractions.OpenIddictExceptions;
 
 namespace OpenIddict.MongoDb;
 
 /// <summary>
 /// Provides methods allowing to manage the applications stored in a database.
 /// </summary>
-/// <typeparam name="TApplication">The type of the Application entity.</typeparam>
-public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplicationStore<TApplication>
+public class OpenIddictMongoDbApplicationStore : OpenIddictMongoDbApplicationStore<OpenIddictMongoDbApplication>
+{
+    public OpenIddictMongoDbApplicationStore(
+        IOpenIddictMongoDbContext context,
+        IOptionsMonitor<OpenIddictMongoDbOptions> options)
+        : base(context, options)
+    {
+    }
+}
+
+/// <summary>
+/// Provides methods allowing to manage the applications stored in a database.
+/// </summary>
+/// <typeparam name="TApplication">The type of the application entity.</typeparam>
+public class OpenIddictMongoDbApplicationStore<
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] TApplication> : IOpenIddictApplicationStore<TApplication>
     where TApplication : OpenIddictMongoDbApplication
 {
     public OpenIddictMongoDbApplicationStore(
         IOpenIddictMongoDbContext context,
         IOptionsMonitor<OpenIddictMongoDbOptions> options)
     {
-        Context = context;
-        Options = options;
+        Context = context ?? throw new ArgumentNullException(nameof(context));
+        Options = options ?? throw new ArgumentNullException(nameof(options));
     }
 
     /// <summary>
@@ -50,27 +67,22 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
     }
 
     /// <inheritdoc/>
-    public virtual async ValueTask<long> CountAsync<TResult>(
-        Func<IQueryable<TApplication>, IQueryable<TResult>> query, CancellationToken cancellationToken)
+    public virtual async ValueTask<long> CountAsync<TState, TResult>(
+        Func<IQueryable<TApplication>, TState, IQueryable<TResult>> query,
+        TState state, CancellationToken cancellationToken)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
-        return await ((IMongoQueryable<TApplication>) query(collection.AsQueryable())).LongCountAsync(cancellationToken);
+        return await query(collection.AsQueryable(), state).LongCountAsync(cancellationToken);
     }
 
     /// <inheritdoc/>
     public virtual async ValueTask CreateAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
@@ -81,24 +93,25 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
     /// <inheritdoc/>
     public virtual async ValueTask DeleteAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
         if ((await collection.DeleteOneAsync(entity =>
             entity.Id == application.Id &&
-            entity.ConcurrencyToken == application.ConcurrencyToken, cancellationToken)).DeletedCount == 0)
+            entity.ConcurrencyToken == application.ConcurrencyToken, cancellationToken)).DeletedCount is 0)
         {
-            throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0239));
+            throw new ConcurrencyException(SR.GetResourceString(SR.ID0239));
         }
 
         // Delete the authorizations associated with the application.
         await database.GetCollection<OpenIddictMongoDbAuthorization>(Options.CurrentValue.AuthorizationsCollectionName)
             .DeleteManyAsync(authorization => authorization.ApplicationId == application.Id, cancellationToken);
+
+        // Delete the sessions associated with the application.
+        await database.GetCollection<OpenIddictMongoDbSession>(Options.CurrentValue.SessionsCollectionName)
+            .DeleteManyAsync(session => session.ApplicationId == application.Id, cancellationToken);
 
         // Delete the tokens associated with the application.
         await database.GetCollection<OpenIddictMongoDbToken>(Options.CurrentValue.TokensCollectionName)
@@ -108,10 +121,7 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
     /// <inheritdoc/>
     public virtual async ValueTask<TApplication?> FindByClientIdAsync(string identifier, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(identifier))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
@@ -122,10 +132,7 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
     /// <inheritdoc/>
     public virtual async ValueTask<TApplication?> FindByIdAsync(string identifier, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(identifier))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0195), nameof(identifier));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
@@ -136,12 +143,9 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
 
     /// <inheritdoc/>
     public virtual IAsyncEnumerable<TApplication> FindByPostLogoutRedirectUriAsync(
-        string address, CancellationToken cancellationToken)
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(address))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0143), nameof(address));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(uri);
 
         return ExecuteAsync(cancellationToken);
 
@@ -151,7 +155,7 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
             var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
             await foreach (var application in collection.Find(application =>
-                application.PostLogoutRedirectUris.Contains(address)).ToAsyncEnumerable(cancellationToken))
+                application.PostLogoutRedirectUris!.Contains(uri)).ToAsyncEnumerable().WithCancellation(cancellationToken))
             {
                 yield return application;
             }
@@ -160,12 +164,9 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
 
     /// <inheritdoc/>
     public virtual IAsyncEnumerable<TApplication> FindByRedirectUriAsync(
-        string address, CancellationToken cancellationToken)
+        [StringSyntax(StringSyntaxAttribute.Uri)] string uri, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(address))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0143), nameof(address));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(uri);
 
         return ExecuteAsync(cancellationToken);
 
@@ -175,7 +176,7 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
             var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
             await foreach (var application in collection.Find(application =>
-                application.RedirectUris.Contains(address)).ToAsyncEnumerable(cancellationToken))
+                application.RedirectUris!.Contains(uri)).ToAsyncEnumerable().WithCancellation(cancellationToken))
             {
                 yield return application;
             }
@@ -183,192 +184,154 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
     }
 
     /// <inheritdoc/>
+    public virtual ValueTask<string?> GetApplicationTypeAsync(TApplication application, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+
+        return new(application.ApplicationType);
+    }
+
+    /// <inheritdoc/>
     public virtual async ValueTask<TResult?> GetAsync<TState, TResult>(
         Func<IQueryable<TApplication>, TState, IQueryable<TResult>> query,
         TState state, CancellationToken cancellationToken)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
-        return await ((IMongoQueryable<TResult>) query(collection.AsQueryable(), state)).FirstOrDefaultAsync(cancellationToken);
+        return await query(collection.AsQueryable(), state).FirstOrDefaultAsync(cancellationToken);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetClientIdAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        return new ValueTask<string?>(application.ClientId);
+        return new(application.ClientId);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetClientSecretAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        return new ValueTask<string?>(application.ClientSecret);
+        return new(application.ClientSecret);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetClientTypeAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        return new ValueTask<string?>(application.Type);
+        return new(application.ClientType);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetConsentTypeAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        return new ValueTask<string?>(application.ConsentType);
+        return new(application.ConsentType);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetDisplayNameAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        return new ValueTask<string?>(application.DisplayName);
+        return new(application.DisplayName);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableDictionary<CultureInfo, string>> GetDisplayNamesAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (application.DisplayNames is null || application.DisplayNames.Count == 0)
-        {
-            return new ValueTask<ImmutableDictionary<CultureInfo, string>>(ImmutableDictionary.Create<CultureInfo, string>());
-        }
-
-        return new ValueTask<ImmutableDictionary<CultureInfo, string>>(application.DisplayNames.ToImmutableDictionary());
+        return new(application.DisplayNames is { Count: > 0 } names
+            ? names.ToImmutableDictionary(static pair => CultureInfo.GetCultureInfo(pair.Key), static pair => pair.Value)
+            : []);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<string?> GetIdAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        return new ValueTask<string?>(application.Id.ToString());
+        return new(application.Id.ToString());
+    }
+
+    /// <inheritdoc/>
+    public virtual ValueTask<JsonWebKeySet?> GetJsonWebKeySetAsync(TApplication application, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+
+        return new(application.JsonWebKeySet is BsonDocument set ? JsonWebKeySet.Create(set.ToJson()) : null);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableArray<string>> GetPermissionsAsync(
         TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (application.Permissions is null || application.Permissions.Count == 0)
-        {
-            return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
-        }
-
-        return new ValueTask<ImmutableArray<string>>(application.Permissions.ToImmutableArray());
+        return new(application.Permissions is { IsDefaultOrEmpty: false } permissions ? permissions : []);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableArray<string>> GetPostLogoutRedirectUrisAsync(
         TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (application.PostLogoutRedirectUris is null || application.PostLogoutRedirectUris.Count == 0)
-        {
-            return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
-        }
-
-        return new ValueTask<ImmutableArray<string>>(application.PostLogoutRedirectUris.ToImmutableArray());
+        return new(application.PostLogoutRedirectUris is { IsDefaultOrEmpty: false } uris ? uris : []);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableDictionary<string, JsonElement>> GetPropertiesAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
         if (application.Properties is null)
         {
-            return new ValueTask<ImmutableDictionary<string, JsonElement>>(ImmutableDictionary.Create<string, JsonElement>());
+            return new([]);
         }
 
         using var document = JsonDocument.Parse(application.Properties.ToJson());
-        var builder = ImmutableDictionary.CreateBuilder<string, JsonElement>();
+        var builder = ImmutableDictionary.CreateBuilder<string, JsonElement>(StringComparer.Ordinal);
 
         foreach (var property in document.RootElement.EnumerateObject())
         {
             builder[property.Name] = property.Value.Clone();
         }
 
-        return new ValueTask<ImmutableDictionary<string, JsonElement>>(builder.ToImmutable());
+        return new(builder.ToImmutable());
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableArray<string>> GetRedirectUrisAsync(
         TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (application.RedirectUris is null || application.RedirectUris.Count == 0)
-        {
-            return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
-        }
-
-        return new ValueTask<ImmutableArray<string>>(application.RedirectUris.ToImmutableArray());
+        return new(application.RedirectUris is { IsDefaultOrEmpty: false } uris ? uris : []);
     }
 
     /// <inheritdoc/>
     public virtual ValueTask<ImmutableArray<string>> GetRequirementsAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (application.Requirements is null || application.Requirements.Count == 0)
-        {
-            return new ValueTask<ImmutableArray<string>>(ImmutableArray.Create<string>());
-        }
+        return new(application.Requirements is { IsDefaultOrEmpty: false } requirements ? requirements : []);
+    }
 
-        return new ValueTask<ImmutableArray<string>>(application.Requirements.ToImmutableArray());
+    /// <inheritdoc/>
+    public virtual ValueTask<ImmutableDictionary<string, string>> GetSettingsAsync(TApplication application, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+
+        return new(application.Settings is { IsEmpty: false } settings ? settings : []);
     }
 
     /// <inheritdoc/>
@@ -376,12 +339,12 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
     {
         try
         {
-            return new ValueTask<TApplication>(Activator.CreateInstance<TApplication>());
+            return new(Activator.CreateInstance<TApplication>());
         }
 
         catch (MemberAccessException exception)
         {
-            return new ValueTask<TApplication>(Task.FromException<TApplication>(
+            return new(Task.FromException<TApplication>(
                 new InvalidOperationException(SR.GetResourceString(SR.ID0240), exception)));
         }
     }
@@ -393,19 +356,19 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
         var database = await Context.GetDatabaseAsync(cancellationToken);
         var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
-        var query = (IMongoQueryable<TApplication>) collection.AsQueryable().OrderBy(application => application.Id);
+        var query = (IQueryable<TApplication>) collection.AsQueryable().OrderBy(static application => application.Id);
 
-        if (offset.HasValue)
+        if (offset is not null)
         {
             query = query.Skip(offset.Value);
         }
 
-        if (count.HasValue)
+        if (count is not null)
         {
             query = query.Take(count.Value);
         }
 
-        await foreach (var application in ((IAsyncCursorSource<TApplication>) query).ToAsyncEnumerable(cancellationToken))
+        await foreach (var application in ((IAsyncCursorSource<TApplication>) query).ToAsyncEnumerable().WithCancellation(cancellationToken))
         {
             yield return application;
         }
@@ -416,10 +379,7 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
         Func<IQueryable<TApplication>, TState, IQueryable<TResult>> query,
         TState state, CancellationToken cancellationToken)
     {
-        if (query is null)
-        {
-            throw new ArgumentNullException(nameof(query));
-        }
+        ArgumentNullException.ThrowIfNull(query);
 
         return ExecuteAsync(cancellationToken);
 
@@ -428,7 +388,7 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
             var database = await Context.GetDatabaseAsync(cancellationToken);
             var collection = database.GetCollection<TApplication>(Options.CurrentValue.ApplicationsCollectionName);
 
-            await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable(cancellationToken))
+            await foreach (var element in query(collection.AsQueryable(), state).ToAsyncEnumerable().WithCancellation(cancellationToken))
             {
                 yield return element;
             }
@@ -436,144 +396,129 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
     }
 
     /// <inheritdoc/>
+    public virtual ValueTask SetApplicationTypeAsync(TApplication application,
+        string? type, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+
+        application.ApplicationType = type;
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc/>
     public virtual ValueTask SetClientIdAsync(TApplication application,
         string? identifier, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
         application.ClientId = identifier;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetClientSecretAsync(TApplication application,
         string? secret, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
         application.ClientSecret = secret;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetClientTypeAsync(TApplication application,
         string? type, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        application.Type = type;
+        application.ClientType = type;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetConsentTypeAsync(TApplication application,
         string? type, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
         application.ConsentType = type;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetDisplayNameAsync(TApplication application,
         string? name, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
         application.DisplayName = name;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetDisplayNamesAsync(TApplication application,
         ImmutableDictionary<CultureInfo, string> names, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        application.DisplayNames = names;
+        application.DisplayNames = names is { Count: > 0 }
+            ? names.ToImmutableDictionary(static pair => pair.Key.Name, static pair => pair.Value, StringComparer.Ordinal)
+            : null;
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
-    public virtual ValueTask SetPermissionsAsync(TApplication application, ImmutableArray<string> permissions, CancellationToken cancellationToken)
+    public virtual ValueTask SetJsonWebKeySetAsync(TApplication application,
+        JsonWebKeySet? set, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (permissions.IsDefaultOrEmpty)
-        {
-            application.Permissions = ImmutableList.Create<string>();
+        application.JsonWebKeySet = set is not null ? BsonDocument.Parse(
+            JsonSerializer.Serialize(set, OpenIddictSerializer.Default.JsonWebKeySet)) : null;
 
-            return default;
-        }
+        return ValueTask.CompletedTask;
+    }
 
-        application.Permissions = permissions.ToImmutableList();
+    /// <inheritdoc/>
+    public virtual ValueTask SetPermissionsAsync(TApplication application,
+        ImmutableArray<string> permissions, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(application);
 
-        return default;
+        application.Permissions = permissions is { IsDefaultOrEmpty: false } ? permissions : null;
+
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetPostLogoutRedirectUrisAsync(TApplication application,
-        ImmutableArray<string> addresses, CancellationToken cancellationToken)
+        ImmutableArray<string> uris, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (addresses.IsDefaultOrEmpty)
-        {
-            application.PostLogoutRedirectUris = ImmutableList.Create<string>();
+        application.PostLogoutRedirectUris = uris is { IsDefaultOrEmpty: false } ? uris : null;
 
-            return default;
-        }
-
-        application.PostLogoutRedirectUris = addresses.ToImmutableList();
-
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetPropertiesAsync(TApplication application,
         ImmutableDictionary<string, JsonElement> properties, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (properties is null || properties.IsEmpty)
+        if (properties is not { IsEmpty: false })
         {
             application.Properties = null;
 
-            return default;
+            return ValueTask.CompletedTask;
         }
 
         using var stream = new MemoryStream();
@@ -596,58 +541,46 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
 
         application.Properties = BsonDocument.Parse(Encoding.UTF8.GetString(stream.ToArray()));
 
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetRedirectUrisAsync(TApplication application,
-        ImmutableArray<string> addresses, CancellationToken cancellationToken)
+        ImmutableArray<string> uris, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (addresses.IsDefaultOrEmpty)
-        {
-            application.RedirectUris = ImmutableList.Create<string>();
+        application.RedirectUris = uris is { IsDefaultOrEmpty: false } ? uris : null;
 
-            return default;
-        }
-
-        application.RedirectUris = addresses.ToImmutableList();
-
-        return default;
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual ValueTask SetRequirementsAsync(TApplication application,
         ImmutableArray<string> requirements, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
-        if (requirements.IsDefaultOrEmpty)
-        {
-            application.Requirements = ImmutableList.Create<string>();
+        application.Requirements = requirements is { IsDefaultOrEmpty: false } ? requirements : null;
 
-            return default;
-        }
+        return ValueTask.CompletedTask;
+    }
 
-        application.Requirements = requirements.ToImmutableList();
+    /// <inheritdoc/>
+    public virtual ValueTask SetSettingsAsync(TApplication application,
+        ImmutableDictionary<string, string> settings, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(application);
 
-        return default;
+        application.Settings = settings is { IsEmpty: false } ? settings : null;
+
+        return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc/>
     public virtual async ValueTask UpdateAsync(TApplication application, CancellationToken cancellationToken)
     {
-        if (application is null)
-        {
-            throw new ArgumentNullException(nameof(application));
-        }
+        ArgumentNullException.ThrowIfNull(application);
 
         // Generate a new concurrency token and attach it
         // to the application before persisting the changes.
@@ -659,9 +592,9 @@ public class OpenIddictMongoDbApplicationStore<TApplication> : IOpenIddictApplic
 
         if ((await collection.ReplaceOneAsync(entity =>
             entity.Id == application.Id &&
-            entity.ConcurrencyToken == timestamp, application, null as ReplaceOptions, cancellationToken)).MatchedCount == 0)
+            entity.ConcurrencyToken == timestamp, application, null as ReplaceOptions, cancellationToken)).MatchedCount is 0)
         {
-            throw new OpenIddictExceptions.ConcurrencyException(SR.GetResourceString(SR.ID0239));
+            throw new ConcurrencyException(SR.GetResourceString(SR.ID0239));
         }
     }
 }

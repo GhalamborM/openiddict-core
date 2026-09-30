@@ -12,12 +12,12 @@ namespace OpenIddict.Validation.DataProtection;
 /// Provides various settings needed to configure the OpenIddict
 /// ASP.NET Core Data Protection validation integration.
 /// </summary>
-public class OpenIddictValidationDataProtectionOptions
+public sealed class OpenIddictValidationDataProtectionOptions
 {
     /// <summary>
     /// Gets or sets the data protection provider used to create the default
     /// data protectors used by the OpenIddict Data Protection validation services.
-    /// When this property is set to <c>null</c>, the data protection provider
+    /// When this property is set to <see langword="null"/>, the data protection provider
     /// is directly retrieved from the dependency injection container.
     /// </summary>
     public IDataProtectionProvider DataProtectionProvider { get; set; } = default!;

@@ -4,9 +4,9 @@
  * the license and the contributors participating to this project.
  */
 
+using System.Security.Claims;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Protocols;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 
 namespace OpenIddict.Validation;
@@ -14,7 +14,7 @@ namespace OpenIddict.Validation;
 /// <summary>
 /// Provides various settings needed to configure the OpenIddict validation handler.
 /// </summary>
-public class OpenIddictValidationOptions
+public sealed class OpenIddictValidationOptions
 {
     /// <summary>
     /// Gets the list of encryption credentials used by the OpenIddict validation services.
@@ -30,7 +30,31 @@ public class OpenIddictValidationOptions
     ///   <item><description>X.509 keys whose backing certificate is not yet valid are never preferred.</description></item>
     /// </list>
     /// </remarks>
-    public List<EncryptingCredentials> EncryptionCredentials { get; } = new();
+    public List<EncryptingCredentials> EncryptionCredentials { get; } = [];
+
+    /// <summary>
+    /// Gets the list of signing credentials used by the OpenIddict validation services.
+    /// Multiple credentials can be added to support key rollover, but if X.509 keys
+    /// are used, at least one of them must have a valid creation/expiration date.
+    /// Note: the signing credentials are not used to protect/unprotect tokens issued
+    /// by ASP.NET Core Data Protection, that uses its own key ring, configured separately.
+    /// </summary>
+    /// <remarks>
+    /// Note: OpenIddict automatically sorts the credentials based on the following algorithm:
+    /// <list type="bullet">
+    ///   <item><description>Symmetric keys are always preferred when they can be used for the operation (e.g token signing).</description></item>
+    ///   <item><description>X.509 keys are always preferred to non-X.509 asymmetric keys.</description></item>
+    ///   <item><description>X.509 keys with the furthest expiration date are preferred.</description></item>
+    ///   <item><description>X.509 keys whose backing certificate is not yet valid are never preferred.</description></item>
+    /// </list>
+    /// </remarks>
+    public List<SigningCredentials> SigningCredentials { get; } = [];
+
+    /// <summary>
+    /// Gets or sets the period of time client assertions remain valid after being issued. The default value is 5 minutes.
+    /// While not recommended, this property can be set to <see langword="null"/> to issue client assertions that never expire.
+    /// </summary>
+    public TimeSpan? ClientAssertionLifetime { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Gets or sets the JWT handler used to protect and unprotect tokens.
@@ -41,11 +65,11 @@ public class OpenIddictValidationOptions
     };
 
     /// <summary>
-    /// Gets the list of the handlers responsible of processing the OpenIddict validation operations.
+    /// Gets the list of the handlers responsible for processing the OpenIddict validation operations.
     /// Note: the list is automatically sorted based on the order assigned to each handler descriptor.
     /// As such, it MUST NOT be mutated after options initialization to preserve the exact order.
     /// </summary>
-    public List<OpenIddictValidationHandlerDescriptor> Handlers { get; } = new(OpenIddictValidationHandlers.DefaultHandlers);
+    public List<OpenIddictValidationHandlerDescriptor> Handlers { get; } = [.. OpenIddictValidationHandlers.DefaultHandlers];
 
     /// <summary>
     /// Gets or sets the type of validation used by the OpenIddict validation services.
@@ -61,6 +85,12 @@ public class OpenIddictValidationOptions
     /// <summary>
     /// Gets or sets the client secret sent to the authorization server when using remote validation.
     /// </summary>
+    /// <remarks>
+    /// Note: client authentication based on shared secrets is not recommended and should
+    /// only be used for backward compatibility with legacy applications that only support
+    /// client secrets. When possible, consider using public/private key pairs or TLS client
+    /// certificates instead, as these client authentication methods are significantly safer.
+    /// </remarks>
     public string? ClientSecret { get; set; }
 
     /// <summary>
@@ -73,6 +103,14 @@ public class OpenIddictValidationOptions
 
     /// <summary>
     /// Gets or sets a boolean indicating whether a database call is made
+    /// to validate the session entry associated with the received tokens.
+    /// Note: enabling this option may have an impact on performance and
+    /// can only be used with an OpenIddict-based authorization server.
+    /// </summary>
+    public bool EnableSessionEntryValidation { get; set; }
+
+    /// <summary>
+    /// Gets or sets a boolean indicating whether a database call is made
     /// to validate the token entry associated with the received tokens.
     /// Note: enabling this option may have an impact on performance but
     /// is required when the OpenIddict server emits reference tokens.
@@ -80,26 +118,36 @@ public class OpenIddictValidationOptions
     public bool EnableTokenEntryValidation { get; set; }
 
     /// <summary>
-    /// Gets or sets the absolute URL of the OAuth 2.0/OpenID Connect server.
+    /// Gets or sets the issuer that will be attached to the <see cref="Claim"/>
+    /// instances created by the OpenIddict validation stack.
+    /// </summary>
+    /// <remarks>
+    /// Note: if this property is not explicitly set, the
+    /// issuer URI is automatically used as a fallback value.
+    /// </remarks>
+    public string? ClaimsIssuer { get; set; }
+
+    /// <summary>
+    /// Gets or sets the absolute URI of the OAuth 2.0/OpenID Connect server.
     /// </summary>
     public Uri? Issuer { get; set; }
 
     /// <summary>
-    /// Gets or sets the URL of the OAuth 2.0/OpenID Connect server discovery endpoint.
-    /// When the URL is relative, <see cref="Issuer"/> must be set and absolute.
+    /// Gets or sets the URI of the configuration endpoint exposed by the server.
+    /// When the URI is relative, <see cref="Issuer"/> must be set and absolute.
     /// </summary>
-    public Uri? MetadataAddress { get; set; }
+    public Uri? ConfigurationEndpoint { get; set; }
 
     /// <summary>
     /// Gets or sets the OAuth 2.0/OpenID Connect static server configuration, if applicable.
     /// </summary>
-    public OpenIdConnectConfiguration? Configuration { get; set; }
+    public OpenIddictConfiguration? Configuration { get; set; }
 
     /// <summary>
     /// Gets or sets the configuration manager used to retrieve
     /// and cache the OAuth 2.0/OpenID Connect server configuration.
     /// </summary>
-    public IConfigurationManager<OpenIdConnectConfiguration> ConfigurationManager { get; set; } = default!;
+    public IConfigurationManager<OpenIddictConfiguration> ConfigurationManager { get; set; } = default!;
 
     /// <summary>
     /// Gets the intended audiences of this resource server.
@@ -107,6 +155,22 @@ public class OpenIddictValidationOptions
     /// server issues access tokens for multiple distinct resource servers.
     /// </summary>
     public HashSet<string> Audiences { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets the OAuth 2.0 client authentication methods enabled for this application.
+    /// </summary>
+    public HashSet<string> ClientAuthenticationMethods { get; } = new(StringComparer.Ordinal)
+    {
+        // Note: client_secret_basic is deliberately not added here as it requires
+        // a dedicated event handler (typically provided by the HTTP integration)
+        // to attach the client credentials to the standard Authorization header.
+        //
+        // The System.Net.Http integration supports the client_secret_basic,
+        // self_signed_tls_client_auth and tls_client_auth authentication
+        // methods and automatically add them to this list at runtime.
+        OpenIddictConstants.ClientAuthenticationMethods.ClientSecretPost,
+        OpenIddictConstants.ClientAuthenticationMethods.PrivateKeyJwt
+    };
 
     /// <summary>
     /// Gets the token validation parameters used by the OpenIddict validation services.
@@ -121,25 +185,24 @@ public class OpenIddictValidationOptions
         // were issued with the generic "typ": "JWT" header. To prevent confused deputy and token substitution
         // attacks, a special "token_usage" claim was added to the JWT payload to convey the actual token type.
         // This validator overrides the default logic used by IdentityModel to resolve the type from this claim.
-        TypeValidator = (type, token, parameters) =>
+        TypeValidator = static (type, token, parameters) =>
         {
             // If available, try to resolve the actual type from the "token_usage" claim.
             if (((JsonWebToken) token).TryGetPayloadValue(Claims.TokenUsage, out string usage))
             {
                 type = usage switch
                 {
-                    TokenTypeHints.AccessToken => JsonWebTokenTypes.AccessToken,
-                    TokenTypeHints.IdToken     => JsonWebTokenTypes.IdentityToken,
+                    "access_token" => JsonWebTokenTypes.AccessToken,
+                    "id_token"     => JsonWebTokenTypes.GenericJsonWebToken,
 
                     _ => throw new NotSupportedException(SR.GetResourceString(SR.ID0269))
                 };
             }
 
-            // At this point, throw an exception if the type cannot be resolved from the "typ" header
-            // (provided via the type delegate parameter) or inferred from the token_usage claim.
+            // Assume that tokens that don't have an explicit "typ" header attached are generic JSON Web Tokens.
             if (string.IsNullOrEmpty(type))
             {
-                throw new SecurityTokenInvalidTypeException(SR.GetResourceString(SR.ID0270));
+                type = JsonWebTokenTypes.GenericJsonWebToken;
             }
 
             // Note: unlike IdentityModel, this custom validator deliberately uses case-insensitive comparisons.
@@ -158,4 +221,14 @@ public class OpenIddictValidationOptions
         ValidateAudience = false,
         ValidateLifetime = false
     };
+
+    /// <summary>
+    /// Gets or sets the time provider.
+    /// </summary>
+    /// <remarks>
+    /// Note: if this property is not explicitly set, the time provider is
+    /// automatically resolved from the dependency injection container.
+    /// If no service can be found, <see cref="TimeProvider.System"/> is used.
+    /// </remarks>
+    public TimeProvider TimeProvider { get; set; } = default!;
 }

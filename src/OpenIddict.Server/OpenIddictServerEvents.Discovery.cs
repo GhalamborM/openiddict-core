@@ -14,7 +14,7 @@ public static partial class OpenIddictServerEvents
     /// Represents an event called for each request to the configuration endpoint to give the user code
     /// a chance to manually extract the configuration request from the ambient HTTP context.
     /// </summary>
-    public class ExtractConfigurationRequestContext : BaseValidatingContext
+    public sealed class ExtractConfigurationRequestContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ExtractConfigurationRequestContext"/> class.
@@ -25,7 +25,7 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it wasn't extracted yet.
+        /// Gets or sets the request, or <see langword="null"/> if it wasn't extracted yet.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -38,7 +38,7 @@ public static partial class OpenIddictServerEvents
     /// Represents an event called for each request to the configuration endpoint
     /// to determine if the request is valid and should continue to be processed.
     /// </summary>
-    public class ValidateConfigurationRequestContext : BaseValidatingContext
+    public sealed class ValidateConfigurationRequestContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ValidateConfigurationRequestContext"/> class.
@@ -62,7 +62,7 @@ public static partial class OpenIddictServerEvents
     /// Represents an event called for each validated configuration request
     /// to allow the user code to decide how the request should be handled.
     /// </summary>
-    public class HandleConfigurationRequestContext : BaseValidatingContext
+    public sealed class HandleConfigurationRequestContext : BaseValidatingContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="HandleConfigurationRequestContext"/> class.
@@ -87,115 +87,182 @@ public static partial class OpenIddictServerEvents
         public Dictionary<string, OpenIddictParameter> Metadata { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
-        /// Gets or sets the authorization endpoint address.
+        /// Gets or sets the issuer URI.
+        /// </summary>
+        public Uri? Issuer { get; set; }
+
+        /// <summary>
+        /// Gets or sets the authorization endpoint URI.
         /// </summary>
         public Uri? AuthorizationEndpoint { get; set; }
 
         /// <summary>
-        /// Gets or sets the JWKS endpoint address.
+        /// Gets or sets the JSON Web Key Set endpoint URI.
         /// </summary>
-        public Uri? CryptographyEndpoint { get; set; }
+        public Uri? JsonWebKeySetEndpoint { get; set; }
 
         /// <summary>
-        /// Gets or sets the device endpoint address.
+        /// Gets or sets the device authorization endpoint URI.
         /// </summary>
-        public Uri? DeviceEndpoint { get; set; }
+        public Uri? DeviceAuthorizationEndpoint { get; set; }
 
         /// <summary>
-        /// Gets or sets the introspection endpoint address.
+        /// Gets or sets the end session endpoint URI.
+        /// </summary>
+        public Uri? EndSessionEndpoint { get; set; }
+
+        /// <summary>
+        /// Gets or sets the introspection endpoint URI.
         /// </summary>
         public Uri? IntrospectionEndpoint { get; set; }
 
         /// <summary>
-        /// Gets or sets the logout endpoint address.
+        /// Gets or sets the pushed authorization endpoint URI.
         /// </summary>
-        public Uri? LogoutEndpoint { get; set; }
+        public Uri? PushedAuthorizationEndpoint { get; set; }
 
         /// <summary>
-        /// Gets or sets the revocation endpoint address.
+        /// Gets or sets the revocation endpoint URI.
         /// </summary>
         public Uri? RevocationEndpoint { get; set; }
 
         /// <summary>
-        /// Gets or sets the token endpoint address.
+        /// Gets or sets the token endpoint URI.
         /// </summary>
         public Uri? TokenEndpoint { get; set; }
 
         /// <summary>
-        /// Gets or sets the userinfo endpoint address.
+        /// Gets or sets the userinfo endpoint URI.
         /// </summary>
-        public Uri? UserinfoEndpoint { get; set; }
+        public Uri? UserInfoEndpoint { get; set; }
+
+        /// <summary>
+        /// Gets or sets the mTLS device authorization endpoint alias URI.
+        /// </summary>
+        public Uri? MtlsDeviceAuthorizationEndpointAlias { get; set; }
+
+        /// <summary>
+        /// Gets or sets the mTLS-specific introspection endpoint alias URI.
+        /// </summary>
+        public Uri? MtlsIntrospectionEndpointAlias { get; set; }
+
+        /// <summary>
+        /// Gets or sets the mTLS pushed authorization endpoint alias URI.
+        /// </summary>
+        public Uri? MtlsPushedAuthorizationEndpointAlias { get; set; }
+
+        /// <summary>
+        /// Gets or sets the mTLS revocation endpoint alias URI.
+        /// </summary>
+        public Uri? MtlsRevocationEndpointAlias { get; set; }
+
+        /// <summary>
+        /// Gets or sets the mTLS token endpoint alias URI.
+        /// </summary>
+        public Uri? MtlsTokenEndpointAlias { get; set; }
+
+        /// <summary>
+        /// Gets or sets the mTLS userinfo endpoint alias URI.
+        /// </summary>
+        public Uri? MtlsUserInfoEndpointAlias { get; set; }
 
         /// <summary>
         /// Gets the list of claims supported by the authorization server.
         /// </summary>
-        public HashSet<string> Claims { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> Claims { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets a list of the code challenge methods
         /// supported by the authorization server.
         /// </summary>
-        public HashSet<string> CodeChallengeMethods { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> CodeChallengeMethods { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets a list of client authentication methods supported by
+        /// the device authorization endpoint provided by the authorization server.
+        /// </summary>
+        public HashSet<string> DeviceAuthorizationEndpointAuthenticationMethods { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets the list of grant types
         /// supported by the authorization server.
         /// </summary>
-        public HashSet<string> GrantTypes { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> GrantTypes { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets a list of signing algorithms supported by the
         /// authorization server for signing the identity tokens.
         /// </summary>
-        public HashSet<string> IdTokenSigningAlgorithms { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> IdTokenSigningAlgorithms { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets a list of client authentication methods supported by
         /// the introspection endpoint provided by the authorization server.
         /// </summary>
-        public HashSet<string> IntrospectionEndpointAuthenticationMethods { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> IntrospectionEndpointAuthenticationMethods { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets the list of prompt values supported by the authorization server.
+        /// </summary>
+        public HashSet<string> PromptValues { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets a list of client authentication methods supported by the pushed
+        /// authorization endpoint provided by the authorization server.
+        /// </summary>
+        public HashSet<string> PushedAuthorizationEndpointAuthenticationMethods { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets the list of response modes
         /// supported by the authorization server.
         /// </summary>
-        public HashSet<string> ResponseModes { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> ResponseModes { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets the list of response types
         /// supported by the authorization server.
         /// </summary>
-        public HashSet<string> ResponseTypes { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> ResponseTypes { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets a list of client authentication methods supported by
         /// the revocation endpoint provided by the authorization server.
         /// </summary>
-        public HashSet<string> RevocationEndpointAuthenticationMethods { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> RevocationEndpointAuthenticationMethods { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets the list of scope values
         /// supported by the authorization server.
         /// </summary>
-        public HashSet<string> Scopes { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> Scopes { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets the list of subject types
         /// supported by the authorization server.
         /// </summary>
-        public HashSet<string> SubjectTypes { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> SubjectTypes { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Gets a list of client authentication methods supported by
         /// the token endpoint provided by the authorization server.
         /// </summary>
-        public HashSet<string> TokenEndpointAuthenticationMethods { get; } = new HashSet<string>(StringComparer.Ordinal);
+        public HashSet<string> TokenEndpointAuthenticationMethods { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether pushed authorization requests are required.
+        /// </summary>
+        public bool RequirePushedAuthorizationRequests { get; set; }
+
+        /// <summary>
+        /// Gets or sets a boolean indicating whether access tokens are bound to client certificates.
+        /// </summary>
+        public bool TlsClientCertificateBoundAccessTokens { get; set; }
     }
 
     /// <summary>
     /// Represents an event called before the configuration response is returned to the caller.
     /// </summary>
-    public class ApplyConfigurationResponseContext : BaseRequestContext
+    public sealed class ApplyConfigurationResponseContext : BaseRequestContext
     {
         /// <summary>
         /// Creates a new instance of the <see cref="ApplyConfigurationResponseContext"/> class.
@@ -206,7 +273,7 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it couldn't be extracted.
+        /// Gets or sets the request, or <see langword="null"/> if it couldn't be extracted.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -226,27 +293,27 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets the error code returned to the client application.
         /// When the response indicates a successful response,
-        /// this property returns <c>null</c>.
+        /// this property returns <see langword="null"/>.
         /// </summary>
         public string? Error => Response.Error;
     }
 
     /// <summary>
-    /// Represents an event called for each request to the cryptography endpoint to give the user code
-    /// a chance to manually extract the cryptography request from the ambient HTTP context.
+    /// Represents an event called for each request to the JSON Web Key Set endpoint to give the user code
+    /// a chance to manually extract the JSON Web Key Set request from the ambient HTTP context.
     /// </summary>
-    public class ExtractCryptographyRequestContext : BaseValidatingContext
+    public sealed class ExtractJsonWebKeySetRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ExtractCryptographyRequestContext"/> class.
+        /// Creates a new instance of the <see cref="ExtractJsonWebKeySetRequestContext"/> class.
         /// </summary>
-        public ExtractCryptographyRequestContext(OpenIddictServerTransaction transaction)
+        public ExtractJsonWebKeySetRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it wasn't extracted yet.
+        /// Gets or sets the request, or <see langword="null"/> if it wasn't extracted yet.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -265,15 +332,15 @@ public static partial class OpenIddictServerEvents
     }
 
     /// <summary>
-    /// Represents an event called for each request to the cryptography endpoint
+    /// Represents an event called for each request to the JSON Web Key Set endpoint
     /// to determine if the request is valid and should continue to be processed.
     /// </summary>
-    public class ValidateCryptographyRequestContext : BaseValidatingContext
+    public sealed class ValidateJsonWebKeySetRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ValidateCryptographyRequestContext"/> class.
+        /// Creates a new instance of the <see cref="ValidateJsonWebKeySetRequestContext"/> class.
         /// </summary>
-        public ValidateCryptographyRequestContext(OpenIddictServerTransaction transaction)
+        public ValidateJsonWebKeySetRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
@@ -289,15 +356,15 @@ public static partial class OpenIddictServerEvents
     }
 
     /// <summary>
-    /// Represents an event called for each validated cryptography request
+    /// Represents an event called for each validated JSON Web Key Set request
     /// to allow the user code to decide how the request should be handled.
     /// </summary>
-    public class HandleCryptographyRequestContext : BaseValidatingContext
+    public sealed class HandleJsonWebKeySetRequestContext : BaseValidatingContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="HandleCryptographyRequestContext"/> class.
+        /// Creates a new instance of the <see cref="HandleJsonWebKeySetRequestContext"/> class.
         /// </summary>
-        public HandleCryptographyRequestContext(OpenIddictServerTransaction transaction)
+        public HandleJsonWebKeySetRequestContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
@@ -312,26 +379,26 @@ public static partial class OpenIddictServerEvents
         }
 
         /// <summary>
-        /// Gets the list of JSON Web Keys exposed by the JWKS endpoint.
+        /// Gets the list of JSON Web Keys exposed by the JSON Web Key Set endpoint.
         /// </summary>
-        public List<JsonWebKey> Keys { get; } = new List<JsonWebKey>();
+        public List<JsonWebKey> Keys { get; } = [];
     }
 
     /// <summary>
-    /// Represents an event called before the cryptography response is returned to the caller.
+    /// Represents an event called before the JSON Web Key Set response is returned to the caller.
     /// </summary>
-    public class ApplyCryptographyResponseContext : BaseRequestContext
+    public sealed class ApplyJsonWebKeySetResponseContext : BaseRequestContext
     {
         /// <summary>
-        /// Creates a new instance of the <see cref="ApplyCryptographyResponseContext"/> class.
+        /// Creates a new instance of the <see cref="ApplyJsonWebKeySetResponseContext"/> class.
         /// </summary>
-        public ApplyCryptographyResponseContext(OpenIddictServerTransaction transaction)
+        public ApplyJsonWebKeySetResponseContext(OpenIddictServerTransaction transaction)
             : base(transaction)
         {
         }
 
         /// <summary>
-        /// Gets or sets the request, or <c>null</c> if it couldn't be extracted.
+        /// Gets or sets the request, or <see langword="null"/> if it couldn't be extracted.
         /// </summary>
         public OpenIddictRequest? Request
         {
@@ -351,7 +418,7 @@ public static partial class OpenIddictServerEvents
         /// <summary>
         /// Gets the error code returned to the client application.
         /// When the response indicates a successful response,
-        /// this property returns <c>null</c>.
+        /// this property returns <see langword="null"/>.
         /// </summary>
         public string? Error => Response.Error;
     }

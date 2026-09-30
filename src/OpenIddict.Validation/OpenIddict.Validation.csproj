@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;net472;netcoreapp3.1;net5.0;net6.0;netstandard2.0;netstandard2.1</TargetFrameworks>
+    <TargetFrameworks>$(NetFrameworkTargetFrameworks);$(NetCoreTargetFrameworks)</TargetFrameworks>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -18,7 +18,13 @@ To use the validation feature on ASP.NET Core or OWIN/Katana, reference the Open
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Logging" />
-    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TargetFrameworkIdentifier)' == '.NETFramework' ">
+    <PackageReference Include="Microsoft.Bcl.Cryptography" />
+    <PackageReference Include="Microsoft.Bcl.Memory" />
   </ItemGroup>
 
   <ItemGroup>

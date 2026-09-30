@@ -5,6 +5,7 @@
  */
 
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using OpenIddict.Validation.Owin;
 
 namespace Microsoft.Extensions.DependencyInjection;
@@ -13,7 +14,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// Exposes the necessary methods required to configure
 /// the OpenIddict validation OWIN/Katana integration.
 /// </summary>
-public class OpenIddictValidationOwinBuilder
+public sealed class OpenIddictValidationOwinBuilder
 {
     /// <summary>
     /// Initializes a new instance of <see cref="OpenIddictValidationOwinBuilder"/>.
@@ -29,22 +30,55 @@ public class OpenIddictValidationOwinBuilder
     public IServiceCollection Services { get; }
 
     /// <summary>
+    /// Enables validation of options during application startup.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/> instance.</returns>
+    public OpenIddictValidationOwinBuilder ValidateOnStart()
+    {
+        Services.AddOptionsWithValidateOnStart<OpenIddictValidationOwinOptions>();
+
+        return this;
+    }
+
+    /// <summary>
     /// Amends the default OpenIddict validation OWIN/Katana configuration.
     /// </summary>
     /// <param name="configuration">The delegate used to configure the OpenIddict options.</param>
     /// <remarks>This extension can be safely called multiple times.</remarks>
-    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/> instance.</returns>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
     public OpenIddictValidationOwinBuilder Configure(Action<OpenIddictValidationOwinOptions> configuration)
     {
-        if (configuration is null)
-        {
-            throw new ArgumentNullException(nameof(configuration));
-        }
+        ArgumentNullException.ThrowIfNull(configuration);
 
         Services.Configure(configuration);
 
         return this;
     }
+
+    /// <summary>
+    /// Prevents OpenIddict from extracting access tokens from the standard "Authorization" header.
+    /// </summary>
+    /// <remarks>
+    /// Disabling access token extraction from the "Authorization" header is NOT recommended.
+    /// </remarks>
+    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/> instance.</returns>
+    public OpenIddictValidationOwinBuilder DisableAccessTokenExtractionFromAuthorizationHeader()
+        => Configure(options => options.DisableAccessTokenExtractionFromAuthorizationHeader = true);
+
+    /// <summary>
+    /// Prevents OpenIddict from extracting access tokens from the standard "access_token" body form parameter.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/> instance.</returns>
+    public OpenIddictValidationOwinBuilder DisableAccessTokenExtractionFromBodyForm()
+        => Configure(options => options.DisableAccessTokenExtractionFromBodyForm = true);
+
+    /// <summary>
+    /// Prevents OpenIddict from extracting access tokens from the standard "access_token" query string parameter.
+    /// </summary>
+    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/> instance.</returns>
+    public OpenIddictValidationOwinBuilder DisableAccessTokenExtractionFromQueryString()
+        => Configure(options => options.DisableAccessTokenExtractionFromQueryString = true);
 
     /// <summary>
     /// Configures the OpenIddict validation OWIN integration to use active authentication.
@@ -53,32 +87,28 @@ public class OpenIddictValidationOwinBuilder
     /// requiring an explicit call to <see cref="AuthenticationManager.Challenge(string[])"/>.
     /// </summary>
     /// <remarks>
-    /// Using active authentication is strongly discouraged in applications using a cookie
-    /// authentication middleware configured to use active authentication, as both middleware
-    /// will be invoked when handling 401 responses, which will result in invalid responses.
+    /// To avoid collisions, using active authentication is strongly discouraged in applications
+    /// registering multiple authentication middleware configured to use active authentication.
     /// </remarks>
-    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/>.</returns>
+    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/> instance.</returns>
     public OpenIddictValidationOwinBuilder UseActiveAuthentication()
         => Configure(options => options.AuthenticationMode = AuthenticationMode.Active);
 
     /// <summary>
     /// Sets the realm returned to the caller as part of the WWW-Authenticate header.
     /// </summary>
-    /// <param name="realm">The issuer address.</param>
-    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/>.</returns>
+    /// <param name="realm">The realm.</param>
+    /// <returns>The <see cref="OpenIddictValidationOwinBuilder"/> instance.</returns>
     public OpenIddictValidationOwinBuilder SetRealm(string realm)
     {
-        if (string.IsNullOrEmpty(realm))
-        {
-            throw new ArgumentException(SR.GetResourceString(SR.ID0107), nameof(realm));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(realm);
 
         return Configure(options => options.Realm = realm);
     }
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public override bool Equals(object? obj) => base.Equals(obj);
+    public override bool Equals([NotNullWhen(true)] object? obj) => base.Equals(obj);
 
     /// <inheritdoc/>
     [EditorBrowsable(EditorBrowsableState.Never)]

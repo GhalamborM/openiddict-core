@@ -7,10 +7,13 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
-using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore;
+using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
@@ -20,24 +23,28 @@ using Properties = OpenIddict.Validation.AspNetCore.OpenIddictValidationAspNetCo
 namespace OpenIddict.Validation.AspNetCore;
 
 [EditorBrowsable(EditorBrowsableState.Never)]
-public static partial class OpenIddictValidationAspNetCoreHandlers
+public static class OpenIddictValidationAspNetCoreHandlers
 {
-    public static ImmutableArray<OpenIddictValidationHandlerDescriptor> DefaultHandlers { get; } = ImmutableArray.Create(
+    public static ImmutableArray<OpenIddictValidationHandlerDescriptor> DefaultHandlers { get; } =
+    [
         /*
          * Request top-level processing:
          */
-        InferIssuerFromHost.Descriptor,
+        ResolveRequestUri.Descriptor,
 
         /*
          * Authentication processing:
          */
+        ValidateHostHeader.Descriptor,
         ExtractAccessTokenFromAuthorizationHeader.Descriptor,
         ExtractAccessTokenFromBodyForm.Descriptor,
         ExtractAccessTokenFromQueryString.Descriptor,
+        ExtractClientCertificate.Descriptor,
 
         /*
          * Challenge processing:
          */
+        ResolveHostChallengeProperties.Descriptor,
         AttachHostChallengeError.Descriptor,
 
         /*
@@ -47,19 +54,18 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         AttachCacheControlHeader<ProcessChallengeContext>.Descriptor,
         AttachWwwAuthenticateHeader<ProcessChallengeContext>.Descriptor,
         ProcessChallengeErrorResponse<ProcessChallengeContext>.Descriptor,
-        ProcessJsonResponse<ProcessChallengeContext>.Descriptor,
 
         AttachHttpResponseCode<ProcessErrorContext>.Descriptor,
         AttachCacheControlHeader<ProcessErrorContext>.Descriptor,
         AttachWwwAuthenticateHeader<ProcessErrorContext>.Descriptor,
-        ProcessChallengeErrorResponse<ProcessChallengeContext>.Descriptor,
-        ProcessJsonResponse<ProcessErrorContext>.Descriptor);
+        ProcessChallengeErrorResponse<ProcessErrorContext>.Descriptor
+    ];
 
     /// <summary>
-    /// Contains the logic responsible of infering the default issuer from the HTTP request host and validating it.
+    /// Contains the logic responsible for resolving the request URI from the ASP.NET Core environment.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class InferIssuerFromHost : IOpenIddictValidationHandler<ProcessRequestContext>
+    public sealed class ResolveRequestUri : IOpenIddictValidationHandler<ProcessRequestContext>
     {
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -67,66 +73,49 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
             = OpenIddictValidationHandlerDescriptor.CreateBuilder<ProcessRequestContext>()
                 .AddFilter<RequireHttpRequest>()
-                .UseSingletonHandler<InferIssuerFromHost>()
-                .SetOrder(int.MinValue + 100_000)
+                .UseSingletonHandler<ResolveRequestUri>()
+                .SetOrder(int.MinValue + 50_000)
                 .SetType(OpenIddictValidationHandlerType.BuiltIn)
                 .Build();
 
         /// <inheritdoc/>
         public ValueTask HandleAsync(ProcessRequestContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
             // this may indicate that the request was incorrectly processed by another server stack.
-            var request = context.Transaction.GetHttpRequest();
-            if (request is null)
-            {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
-            }
+            var request = context.Transaction.GetHttpRequest()
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
 
-            // Only use the current host as the issuer if the
-            // issuer was not explicitly set in the options.
-            if (context.Issuer is not null)
-            {
-                return default;
-            }
+            // OpenIddict supports both absolute and relative URIs for all its endpoints, but only absolute
+            // URIs can be properly canonicalized by the BCL System.Uri class (e.g './path/../' is normalized
+            // to './' once the URI is fully constructed). At this stage of the request processing, rejecting
+            // requests that lack the host information (e.g because HTTP/1.0 was used and no Host header was
+            // sent by the HTTP client) is not desirable as it would affect all requests, including requests
+            // that are not meant to be handled by OpenIddict itself. To avoid that, a fake host is temporarily
+            // used to build an absolute base URI and a request URI that will be used to determine whether the
+            // received request matches one of the URIs assigned to an OpenIddict endpoint. If the request
+            // is later handled by OpenIddict, an additional check will be made to require the Host header.
+            var host = request.Host.HasValue ? request.Host : new HostString("localhost");
 
-            if (!request.Host.HasValue)
-            {
-                context.Reject(
-                    error: Errors.InvalidRequest,
-                    description: SR.FormatID2081(HeaderNames.Host),
-                    uri: SR.FormatID8000(SR.ID2081));
+            context.BaseUri = CreateUri(UriHelper.BuildAbsolute(request.Scheme, host, request.PathBase));
+            context.RequestUri = CreateUri(UriHelper.BuildAbsolute(request.Scheme, host, request.PathBase, request.Path, request.QueryString));
 
-                return default;
-            }
+            return ValueTask.CompletedTask;
 
-            if (!Uri.TryCreate(request.Scheme + Uri.SchemeDelimiter + request.Host + request.PathBase, UriKind.Absolute, out Uri? issuer) ||
-                !issuer.IsWellFormedOriginalString())
-            {
-                context.Reject(
-                    error: Errors.InvalidRequest,
-                    description: SR.FormatID2082(HeaderNames.Host),
-                    uri: SR.FormatID8000(SR.ID2082));
-
-                return default;
-            }
-
-            context.Issuer = issuer;
-
-            return default;
+            // Note: the BCL System.Uri class has strict rules (e.g it rejects specific characters and enforces a
+            // limit of 65519 characters for the complete URI representation). To ensure no exception is thrown if the
+            // URI cannot be built (which would also affect non-OpenIddict endpoints), Uri.TryCreate() is used here.
+            static Uri? CreateUri(string value) => Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) ? uri : null;
         }
     }
 
     /// <summary>
-    /// Contains the logic responsible of extracting the access token from the standard HTTP Authorization header.
+    /// Contains the logic responsible for validating the Host header extracted from the HTTP header.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class ExtractAccessTokenFromAuthorizationHeader : IOpenIddictValidationHandler<ProcessAuthenticationContext>
+    public sealed class ValidateHostHeader : IOpenIddictValidationHandler<ProcessAuthenticationContext>
     {
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -134,7 +123,50 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
             = OpenIddictValidationHandlerDescriptor.CreateBuilder<ProcessAuthenticationContext>()
                 .AddFilter<RequireHttpRequest>()
-                .AddFilter<RequireAccessTokenValidated>()
+                .UseSingletonHandler<ValidateHostHeader>()
+                .SetOrder(int.MinValue + 50_000)
+                .SetType(OpenIddictValidationHandlerType.BuiltIn)
+                .Build();
+
+        /// <inheritdoc/>
+        public ValueTask HandleAsync(ProcessAuthenticationContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
+            // this may indicate that the request was incorrectly processed by another server stack.
+            var request = context.Transaction.GetHttpRequest()
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
+
+            // Don't require that a Host header be present if the issuer was set in the options.
+            if (context.Options.Issuer is null && !request.Host.HasValue)
+            {
+                context.Reject(
+                    error: Errors.InvalidRequest,
+                    description: SR.FormatID2081(HeaderNames.Host),
+                    uri: SR.FormatID8000(SR.ID2081));
+
+                return ValueTask.CompletedTask;
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Contains the logic responsible for extracting the access token from the standard HTTP Authorization header.
+    /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
+    /// </summary>
+    public sealed class ExtractAccessTokenFromAuthorizationHeader : IOpenIddictValidationHandler<ProcessAuthenticationContext>
+    {
+        /// <summary>
+        /// Gets the default descriptor definition assigned to this handler.
+        /// </summary>
+        public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
+            = OpenIddictValidationHandlerDescriptor.CreateBuilder<ProcessAuthenticationContext>()
+                .AddFilter<RequireHttpRequest>()
+                .AddFilter<RequireAccessTokenExtracted>()
+                .AddFilter<RequireAccessTokenExtractionFromAuthorizationHeaderEnabled>()
                 .UseSingletonHandler<ExtractAccessTokenFromAuthorizationHeader>()
                 .SetOrder(EvaluateValidatedTokens.Descriptor.Order + 500)
                 .SetType(OpenIddictValidationHandlerType.BuiltIn)
@@ -143,44 +175,38 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         /// <inheritdoc/>
         public ValueTask HandleAsync(ProcessAuthenticationContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             // If a token was already resolved, don't overwrite it.
             if (!string.IsNullOrEmpty(context.AccessToken))
             {
-                return default;
+                return ValueTask.CompletedTask;
             }
 
             // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
             // this may indicate that the request was incorrectly processed by another server stack.
-            var request = context.Transaction.GetHttpRequest();
-            if (request is null)
-            {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
-            }
+            var request = context.Transaction.GetHttpRequest()
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
 
             // Resolve the access token from the standard Authorization header.
             // See https://tools.ietf.org/html/rfc6750#section-2.1 for more information.
-            string header = request.Headers[HeaderNames.Authorization];
+            string? header = request.Headers[HeaderNames.Authorization];
             if (!string.IsNullOrEmpty(header) && header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
             {
-                context.AccessToken = header.Substring("Bearer ".Length);
+                context.AccessToken = header["Bearer ".Length..];
 
-                return default;
+                return ValueTask.CompletedTask;
             }
 
-            return default;
+            return ValueTask.CompletedTask;
         }
     }
 
     /// <summary>
-    /// Contains the logic responsible of extracting the access token from the standard access_token form parameter.
+    /// Contains the logic responsible for extracting the access token from the standard access_token form parameter.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class ExtractAccessTokenFromBodyForm : IOpenIddictValidationHandler<ProcessAuthenticationContext>
+    public sealed class ExtractAccessTokenFromBodyForm : IOpenIddictValidationHandler<ProcessAuthenticationContext>
     {
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -188,7 +214,8 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
             = OpenIddictValidationHandlerDescriptor.CreateBuilder<ProcessAuthenticationContext>()
                 .AddFilter<RequireHttpRequest>()
-                .AddFilter<RequireAccessTokenValidated>()
+                .AddFilter<RequireAccessTokenExtracted>()
+                .AddFilter<RequireAccessTokenExtractionFromBodyFormEnabled>()
                 .UseSingletonHandler<ExtractAccessTokenFromBodyForm>()
                 .SetOrder(ExtractAccessTokenFromAuthorizationHeader.Descriptor.Order + 1_000)
                 .SetType(OpenIddictValidationHandlerType.BuiltIn)
@@ -197,10 +224,7 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         /// <inheritdoc/>
         public async ValueTask HandleAsync(ProcessAuthenticationContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             // If a token was already resolved, don't overwrite it.
             if (!string.IsNullOrEmpty(context.AccessToken))
@@ -210,11 +234,8 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
 
             // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
             // this may indicate that the request was incorrectly processed by another server stack.
-            var request = context.Transaction.GetHttpRequest();
-            if (request is null)
-            {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
-            }
+            var request = context.Transaction.GetHttpRequest()
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
 
             if (string.IsNullOrEmpty(request.ContentType) ||
                 !request.ContentType.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
@@ -224,7 +245,7 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
 
             // Resolve the access token from the standard access_token form parameter.
             // See https://tools.ietf.org/html/rfc6750#section-2.2 for more information.
-            var form = await request.ReadFormAsync(request.HttpContext.RequestAborted);
+            var form = await request.ReadFormAsync(context.CancellationToken);
             if (form.TryGetValue(Parameters.AccessToken, out StringValues token))
             {
                 context.AccessToken = token;
@@ -235,10 +256,10 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
     }
 
     /// <summary>
-    /// Contains the logic responsible of extracting the access token from the standard access_token query parameter.
+    /// Contains the logic responsible for extracting the access token from the standard access_token query parameter.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class ExtractAccessTokenFromQueryString : IOpenIddictValidationHandler<ProcessAuthenticationContext>
+    public sealed class ExtractAccessTokenFromQueryString : IOpenIddictValidationHandler<ProcessAuthenticationContext>
     {
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -246,7 +267,8 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
             = OpenIddictValidationHandlerDescriptor.CreateBuilder<ProcessAuthenticationContext>()
                 .AddFilter<RequireHttpRequest>()
-                .AddFilter<RequireAccessTokenValidated>()
+                .AddFilter<RequireAccessTokenExtracted>()
+                .AddFilter<RequireAccessTokenExtractionFromQueryStringEnabled>()
                 .UseSingletonHandler<ExtractAccessTokenFromQueryString>()
                 .SetOrder(ExtractAccessTokenFromBodyForm.Descriptor.Order + 1_000)
                 .SetType(OpenIddictValidationHandlerType.BuiltIn)
@@ -255,24 +277,18 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         /// <inheritdoc/>
         public ValueTask HandleAsync(ProcessAuthenticationContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             // If a token was already resolved, don't overwrite it.
             if (!string.IsNullOrEmpty(context.AccessToken))
             {
-                return default;
+                return ValueTask.CompletedTask;
             }
 
             // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
             // this may indicate that the request was incorrectly processed by another server stack.
-            var request = context.Transaction.GetHttpRequest();
-            if (request is null)
-            {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
-            }
+            var request = context.Transaction.GetHttpRequest()
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
 
             // Resolve the access token from the standard access_token query parameter.
             // See https://tools.ietf.org/html/rfc6750#section-2.3 for more information.
@@ -280,18 +296,114 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
             {
                 context.AccessToken = token;
 
-                return default;
+                return ValueTask.CompletedTask;
             }
 
-            return default;
+            return ValueTask.CompletedTask;
         }
     }
 
     /// <summary>
-    /// Contains the logic responsible of attaching the error details using the ASP.NET Core authentication properties.
+    /// Contains the logic responsible for extracting a client certificate from the request context.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class AttachHostChallengeError : IOpenIddictValidationHandler<ProcessChallengeContext>
+    public sealed class ExtractClientCertificate : IOpenIddictValidationHandler<ProcessAuthenticationContext>
+    {
+        /// <summary>
+        /// Gets the default descriptor definition assigned to this handler.
+        /// </summary>
+        public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
+            = OpenIddictValidationHandlerDescriptor.CreateBuilder<ProcessAuthenticationContext>()
+                .AddFilter<RequireHttpRequest>()
+                .UseSingletonHandler<ExtractClientCertificate>()
+                .SetOrder(ExtractAccessTokenFromQueryString.Descriptor.Order + 1_000)
+                .SetType(OpenIddictValidationHandlerType.BuiltIn)
+                .Build();
+
+        /// <inheritdoc/>
+        public async ValueTask HandleAsync(ProcessAuthenticationContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
+            // this may indicate that the request was incorrectly processed by another server stack.
+            var request = context.Transaction.GetHttpRequest()
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
+
+            // If a client certificate was used during the TLS handshake, attach it to the context.
+            if (request.IsHttps && await request.HttpContext.Connection.GetClientCertificateAsync(
+                context.CancellationToken) is X509Certificate2 certificate)
+            {
+                context.Transaction.RemoteCertificate = certificate;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Contains the logic responsible for resolving the context-specific properties and parameters stored in the
+    /// ASP.NET Core authentication properties specified by the application that triggered the challenge operation.
+    /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
+    /// </summary>
+    public sealed class ResolveHostChallengeProperties : IOpenIddictValidationHandler<ProcessChallengeContext>
+    {
+        /// <summary>
+        /// Gets the default descriptor definition assigned to this handler.
+        /// </summary>
+        public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
+            = OpenIddictValidationHandlerDescriptor.CreateBuilder<ProcessChallengeContext>()
+                .AddFilter<RequireHttpRequest>()
+                .UseSingletonHandler<ResolveHostChallengeProperties>()
+                .SetOrder(AttachHostChallengeError.Descriptor.Order - 500)
+                .SetType(OpenIddictValidationHandlerType.BuiltIn)
+                .Build();
+
+        /// <inheritdoc/>
+        public ValueTask HandleAsync(ProcessChallengeContext context)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+
+            var properties = context.Transaction.GetProperty<AuthenticationProperties>(typeof(AuthenticationProperties).FullName!);
+            if (properties is { Items.Count: > 0 })
+            {
+                foreach (var property in properties.Items)
+                {
+                    context.Properties[property.Key] = property.Value;
+                }
+            }
+
+            if (properties is { Parameters.Count: > 0 })
+            {
+                foreach (var parameter in properties.Parameters)
+                {
+                    context.Parameters[parameter.Key] = parameter.Value switch
+                    {
+                        OpenIddictParameter value => value,
+
+                        JsonElement             value => new OpenIddictParameter(value),
+                        JsonNode                value => new OpenIddictParameter(value),
+                        bool                    value => new OpenIddictParameter(value),
+                        int                     value => new OpenIddictParameter(value),
+                        long                    value => new OpenIddictParameter(value),
+                        string                  value => new OpenIddictParameter(value),
+                        ImmutableArray<string?> value => new OpenIddictParameter(value),
+
+                        string?[]            value => new(ImmutableCollectionsMarshal.AsImmutableArray(value)),
+                        IEnumerable<string?> value => new OpenIddictParameter([.. value]),
+
+                        _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0115))
+                    };
+                }
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Contains the logic responsible for attaching the error details using the ASP.NET Core authentication properties.
+    /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
+    /// </summary>
+    public sealed class AttachHostChallengeError : IOpenIddictValidationHandler<ProcessChallengeContext>
     {
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -300,73 +412,33 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
             = OpenIddictValidationHandlerDescriptor.CreateBuilder<ProcessChallengeContext>()
                 .AddFilter<RequireHttpRequest>()
                 .UseSingletonHandler<AttachHostChallengeError>()
-                .SetOrder(int.MinValue + 50_000)
+                .SetOrder(AttachDefaultChallengeError.Descriptor.Order - 500)
                 .SetType(OpenIddictValidationHandlerType.BuiltIn)
                 .Build();
 
         /// <inheritdoc/>
         public ValueTask HandleAsync(ProcessChallengeContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             var properties = context.Transaction.GetProperty<AuthenticationProperties>(typeof(AuthenticationProperties).FullName!);
-            if (properties is null)
+            if (properties is not null)
             {
-                return default;
+                context.Response.Error = properties.GetString(Properties.Error);
+                context.Response.ErrorDescription = properties.GetString(Properties.ErrorDescription);
+                context.Response.ErrorUri = properties.GetString(Properties.ErrorUri);
+                context.Response.Scope = properties.GetString(Properties.Scope);
             }
 
-            if (properties.Items.TryGetValue(Properties.Error, out string? error) &&
-                !string.IsNullOrEmpty(error))
-            {
-                context.Parameters[Parameters.Error] = error;
-            }
-
-            if (properties.Items.TryGetValue(Properties.ErrorDescription, out string? description) &&
-                !string.IsNullOrEmpty(description))
-            {
-                context.Parameters[Parameters.ErrorDescription] = description;
-            }
-
-            if (properties.Items.TryGetValue(Properties.ErrorUri, out string? uri) &&
-                !string.IsNullOrEmpty(uri))
-            {
-                context.Parameters[Parameters.ErrorUri] = uri;
-            }
-
-            if (properties.Items.TryGetValue(Properties.Scope, out string? scope) &&
-                !string.IsNullOrEmpty(scope))
-            {
-                context.Parameters[Parameters.Scope] = scope;
-            }
-
-            foreach (var parameter in properties.Parameters)
-            {
-                context.Parameters[parameter.Key] = parameter.Value switch
-                {
-                    OpenIddictParameter value => value,
-                    JsonElement         value => new OpenIddictParameter(value),
-                    bool                value => new OpenIddictParameter(value),
-                    int                 value => new OpenIddictParameter(value),
-                    long                value => new OpenIddictParameter(value),
-                    string              value => new OpenIddictParameter(value),
-                    string[]            value => new OpenIddictParameter(value),
-
-                    _ => throw new InvalidOperationException(SR.GetResourceString(SR.ID0115))
-                };
-            }
-
-            return default;
+            return ValueTask.CompletedTask;
         }
     }
 
     /// <summary>
-    /// Contains the logic responsible of attaching an appropriate HTTP status code.
+    /// Contains the logic responsible for attaching an appropriate HTTP status code.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class AttachHttpResponseCode<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
+    public sealed class AttachHttpResponseCode<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
     {
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -382,41 +454,38 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         /// <inheritdoc/>
         public ValueTask HandleAsync(TContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             Debug.Assert(context.Transaction.Response is not null, SR.GetResourceString(SR.ID4007));
 
             // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
             // this may indicate that the request was incorrectly processed by another server stack.
-            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response;
-            if (response is null)
-            {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
-            }
+            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
 
             response.StatusCode = context.Transaction.Response.Error switch
             {
-                null => 200,
+                // Note: the default code may be replaced by another handler (e.g when doing redirects).
+                null or { Length: 0 } => 200,
 
                 Errors.InvalidToken or Errors.MissingToken => 401,
 
                 Errors.InsufficientAccess or Errors.InsufficientScope => 403,
 
+                Errors.ServerError => 500,
+
                 _ => 400
             };
 
-            return default;
+            return ValueTask.CompletedTask;
         }
     }
 
     /// <summary>
-    /// Contains the logic responsible of attaching the appropriate HTTP response cache headers.
+    /// Contains the logic responsible for attaching the appropriate HTTP response cache headers.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class AttachCacheControlHeader<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
+    public sealed class AttachCacheControlHeader<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
     {
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -432,38 +501,32 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         /// <inheritdoc/>
         public ValueTask HandleAsync(TContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
             // this may indicate that the request was incorrectly processed by another server stack.
-            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response;
-            if (response is null)
-            {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
-            }
+            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
 
             // Prevent the response from being cached.
             response.Headers[HeaderNames.CacheControl] = "no-store";
             response.Headers[HeaderNames.Pragma] = "no-cache";
             response.Headers[HeaderNames.Expires] = "Thu, 01 Jan 1970 00:00:00 GMT";
 
-            return default;
+            return ValueTask.CompletedTask;
         }
     }
 
     /// <summary>
-    /// Contains the logic responsible of attaching errors details to the WWW-Authenticate header.
+    /// Contains the logic responsible for attaching errors details to the WWW-Authenticate header.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class AttachWwwAuthenticateHeader<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
+    public sealed class AttachWwwAuthenticateHeader<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
     {
         private readonly IOptionsMonitor<OpenIddictValidationAspNetCoreOptions> _options;
 
         public AttachWwwAuthenticateHeader(IOptionsMonitor<OpenIddictValidationAspNetCoreOptions> options)
-            => _options = options;
+            => _options = options ?? throw new ArgumentNullException(nameof(options));
 
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -479,52 +542,43 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
         /// <inheritdoc/>
         public ValueTask HandleAsync(TContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             Debug.Assert(context.Transaction.Response is not null, SR.GetResourceString(SR.ID4007));
 
             // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
             // this may indicate that the request was incorrectly processed by another server stack.
-            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response;
-            if (response is null)
+            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
+
+            if (string.IsNullOrEmpty(context.Transaction.Response.Error))
             {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
+                return ValueTask.CompletedTask;
             }
 
-            var scheme = context.Transaction.Response.Error switch
-            {
-                Errors.InvalidToken or
-                Errors.MissingToken or
-                Errors.InsufficientAccess or
-                Errors.InsufficientScope => Schemes.Bearer,
-
-                _ => null
-            };
-
-            if (string.IsNullOrEmpty(scheme))
-            {
-                return default;
-            }
+            // Note: unlike the server stack, the validation stack doesn't expose any endpoint
+            // and thus never returns responses containing a formatted body (e.g a JSON response).
+            //
+            // As such, all errors - even errors indicating an invalid request - are returned
+            // as part of the standard WWW-Authenticate header, as defined by the specification.
+            // See https://datatracker.ietf.org/doc/html/rfc6750#section-3 for more information.
 
             var parameters = new Dictionary<string, string>(StringComparer.Ordinal);
 
             // If a realm was configured in the options, attach it to the parameters.
-            if (!string.IsNullOrEmpty(_options.CurrentValue.Realm))
+            if (_options.CurrentValue.Realm is string { Length: > 0 } realm)
             {
-                parameters[Parameters.Realm] = _options.CurrentValue.Realm;
+                parameters[Parameters.Realm] = realm;
             }
 
             foreach (var parameter in context.Transaction.Response.GetParameters())
             {
                 // Note: the error details are only included if the error was not caused by a missing token, as recommended
                 // by the OAuth 2.0 bearer specification: https://tools.ietf.org/html/rfc6750#section-3.1.
-                if (string.Equals(context.Transaction.Response.Error, Errors.MissingToken, StringComparison.Ordinal) &&
-                   (string.Equals(parameter.Key, Parameters.Error, StringComparison.Ordinal) ||
-                    string.Equals(parameter.Key, Parameters.ErrorDescription, StringComparison.Ordinal) ||
-                    string.Equals(parameter.Key, Parameters.ErrorUri, StringComparison.Ordinal)))
+                if (context.Transaction.Response.Error is Errors.MissingToken &&
+                    parameter.Key is Parameters.Error            or
+                                     Parameters.ErrorDescription or
+                                     Parameters.ErrorUri)
                 {
                     continue;
                 }
@@ -539,7 +593,7 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
                 parameters[parameter.Key] = value;
             }
 
-            var builder = new StringBuilder(scheme);
+            var builder = new StringBuilder(Schemes.Bearer);
 
             foreach (var parameter in parameters)
             {
@@ -547,28 +601,28 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
                 builder.Append(parameter.Key);
                 builder.Append('=');
                 builder.Append('"');
-                builder.Append(parameter.Value.Replace("\"", "\\\""));
+                builder.Append(parameter.Value.Replace("\"", "\\\"", StringComparison.Ordinal));
                 builder.Append('"');
                 builder.Append(',');
             }
 
             // If the WWW-Authenticate header ends with a comma, remove it.
-            if (builder[builder.Length - 1] == ',')
+            if (builder[^1] == ',')
             {
                 builder.Remove(builder.Length - 1, 1);
             }
 
             response.Headers.Append(HeaderNames.WWWAuthenticate, builder.ToString());
 
-            return default;
+            return ValueTask.CompletedTask;
         }
     }
 
     /// <summary>
-    /// Contains the logic responsible of processing challenge responses that contain a WWW-Authenticate header.
+    /// Contains the logic responsible for processing challenge responses that contain a WWW-Authenticate header.
     /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
     /// </summary>
-    public class ProcessChallengeErrorResponse<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
+    public sealed class ProcessChallengeErrorResponse<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
     {
         /// <summary>
         /// Gets the default descriptor definition assigned to this handler.
@@ -577,93 +631,30 @@ public static partial class OpenIddictValidationAspNetCoreHandlers
             = OpenIddictValidationHandlerDescriptor.CreateBuilder<TContext>()
                 .AddFilter<RequireHttpRequest>()
                 .UseSingletonHandler<ProcessChallengeErrorResponse<TContext>>()
-                .SetOrder(AttachWwwAuthenticateHeader<TContext>.Descriptor.Order + 1_000)
+                .SetOrder(500_000)
                 .SetType(OpenIddictValidationHandlerType.BuiltIn)
                 .Build();
 
         /// <inheritdoc/>
         public ValueTask HandleAsync(TContext context)
         {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
+            ArgumentNullException.ThrowIfNull(context);
 
             // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
             // this may indicate that the request was incorrectly processed by another server stack.
-            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response;
-            if (response is null)
-            {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
-            }
+            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response
+                ?? throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
 
             // If the response doesn't contain a WWW-Authenticate header, don't return an empty response.
             if (!response.Headers.ContainsKey(HeaderNames.WWWAuthenticate))
             {
-                return default;
+                return ValueTask.CompletedTask;
             }
 
-            context.Logger.LogInformation(SR.GetResourceString(SR.ID6141), context.Transaction.Response);
+            context.Logger.LogInformation(6141, SR.GetResourceString(SR.ID6141), context.Transaction.Response);
             context.HandleRequest();
 
-            return default;
-        }
-    }
-
-    /// <summary>
-    /// Contains the logic responsible of processing OpenID Connect responses that must be returned as JSON.
-    /// Note: this handler is not used when the OpenID Connect request is not initially handled by ASP.NET Core.
-    /// </summary>
-    public class ProcessJsonResponse<TContext> : IOpenIddictValidationHandler<TContext> where TContext : BaseRequestContext
-    {
-        /// <summary>
-        /// Gets the default descriptor definition assigned to this handler.
-        /// </summary>
-        public static OpenIddictValidationHandlerDescriptor Descriptor { get; }
-            = OpenIddictValidationHandlerDescriptor.CreateBuilder<TContext>()
-                .AddFilter<RequireHttpRequest>()
-                .UseSingletonHandler<ProcessJsonResponse<TContext>>()
-                .SetOrder(ProcessChallengeErrorResponse<TContext>.Descriptor.Order + 1_000)
-                .SetType(OpenIddictValidationHandlerType.BuiltIn)
-                .Build();
-
-        /// <inheritdoc/>
-        public async ValueTask HandleAsync(TContext context)
-        {
-            if (context is null)
-            {
-                throw new ArgumentNullException(nameof(context));
-            }
-
-            Debug.Assert(context.Transaction.Response is not null, SR.GetResourceString(SR.ID4007));
-
-            // This handler only applies to ASP.NET Core requests. If the HTTP context cannot be resolved,
-            // this may indicate that the request was incorrectly processed by another server stack.
-            var response = context.Transaction.GetHttpRequest()?.HttpContext.Response;
-            if (response is null)
-            {
-                throw new InvalidOperationException(SR.GetResourceString(SR.ID0114));
-            }
-
-            context.Logger.LogInformation(SR.GetResourceString(SR.ID6142), context.Transaction.Response);
-
-            using var stream = new MemoryStream();
-            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
-            {
-                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                Indented = true
-            });
-
-            context.Transaction.Response.WriteTo(writer);
-            writer.Flush();
-
-            response.ContentLength = stream.Length;
-            response.ContentType = "application/json;charset=UTF-8";
-
-            stream.Seek(offset: 0, loc: SeekOrigin.Begin);
-            await stream.CopyToAsync(response.Body, 4096, response.HttpContext.RequestAborted);
-
-            context.HandleRequest();
+            return ValueTask.CompletedTask;
         }
     }
 }

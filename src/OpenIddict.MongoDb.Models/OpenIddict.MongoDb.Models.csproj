@@ -1,9 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net461;netstandard2.0</TargetFrameworks>
-    <SignAssembly>false</SignAssembly>
-    <PublicSign>false</PublicSign>
+    <TargetFrameworks>$(NetFrameworkTargetFrameworks);$(NetCoreTargetFrameworks)</TargetFrameworks>
+    <IncludeInternalExtensions>false</IncludeInternalExtensions>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -13,13 +12,15 @@
 
   <ItemGroup>
     <PackageReference Include="MongoDB.Bson" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TargetFrameworkIdentifier)' == '.NETFramework' ">
     <PackageReference Include="System.Collections.Immutable" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="MongoDB.Bson" />
     <Using Include="MongoDB.Bson.Serialization.Attributes" />
-    <Using Remove="System.Net.Http" />
   </ItemGroup>
 
 </Project>
